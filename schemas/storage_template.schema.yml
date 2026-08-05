@@ -1,0 +1,38 @@
+$schema: "http://json-schema.org/draft-07/schema#"
+title: StorageTemplate
+type: object
+required:
+  - template
+  - storage
+properties:
+  template:
+    type: object
+    required:
+      - name
+      - description
+    properties:
+      name:
+        type: string
+      description:
+        type: string
+  storage:
+    type: object
+    required:
+      - type
+      - filesystem
+      - content
+      - mount_base
+      - wipe
+    properties:
+      type:
+        type: string
+      filesystem:
+        type: string
+      content:
+        type: array
+        items:
+          type: string
+      mount_base:
+        type: string
+      wipe:
+        type: boolean

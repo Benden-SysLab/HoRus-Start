@@ -1,0 +1,48 @@
+---
+# 2.1 Discovery Tasks: Check existing cluster status & validate cluster name
+- name: "2.1.1 [Discovery] Check existing cluster status via pvecm status"
+  ansible.builtin.command: pvecm status
+  register: pvecm_status_raw
+  failed_when: false
+  changed_when: false
+
+- name: "2.1.2 [Discovery] Check presence of corosync.conf (/etc/pve/corosync.conf)"
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: corosync_conf_stat
+
+- name: "2.1.3 [Discovery] Check presence of cluster members file (/etc/pve/.members)"
+  ansible.builtin.stat:
+    path: /etc/pve/.members
+  register: pve_members_stat
+
+- name: "2.1.4 [Discovery] Extract existing cluster name if present"
+  ansible.builtin.set_fact:
+    current_cluster_name: "{{ (pvecm_status_raw.stdout | regex_search('(?i)Name:\\s+(\\S+)', '\\1') | first) if (pvecm_status_raw.rc == 0 and 'Name:' in pvecm_status_raw.stdout) else 'None' }}"
+
+- name: "2.1.5 [Discovery] Determine if node is already part of a cluster"
+  ansible.builtin.set_fact:
+    is_in_cluster: "{{ corosync_conf_stat.stat.exists or pve_members_stat.stat.exists or (pvecm_status_raw.rc == 0) }}"
+    is_target_cluster: "{{ (current_cluster_name == (cluster_name | default('HoRus-SysLab'))) or (not corosync_conf_stat.stat.exists and pvecm_status_raw.rc != 0) }}"
+
+- name: "2.1.6 [Discovery] Display initial cluster discovery findings"
+  ansible.builtin.debug:
+    msg:
+      - "Node: {{ inventory_hostname }} ({{ ansible_host }})"
+      - "Corosync Config Present: {{ corosync_conf_stat.stat.exists }}"
+      - "pvecm status return code: {{ pvecm_status_raw.rc }}"
+      - "Detected Cluster Name: {{ current_cluster_name }}"
+      - "Target Cluster Name: {{ cluster_name | default('HoRus-SysLab') }}"
+      - "Is Node In Cluster: {{ is_in_cluster }}"
+
+- name: "2.1.7 [Discovery] Safety check: Prevent joining a conflicting cluster"
+  ansible.builtin.fail:
+    msg: >-
+      CRITICAL SAFETY INTERVENTION: Node '{{ inventory_hostname }}' is ALREADY part of an active cluster
+      with name '{{ current_cluster_name }}', which DOES NOT MATCH expected target '{{ cluster_name | default('HoRus-SysLab') }}'.
+      To prevent accidental quorum destruction or split-brain corruption, automated override is BLOCKED.
+      Manually inspect 'pvecm status' and /etc/pve/corosync.conf before retrying.
+  when:
+    - is_in_cluster
+    - current_cluster_name != 'None'
+    - current_cluster_name != (cluster_name | default('HoRus-SysLab'))

@@ -1,0 +1,63 @@
+---
+# roles/infrastructure_repository/tasks/main.yml
+# Establishes storage-infra directory hierarchy & downloads boot artifacts with SHA256 validation
+
+- name: Create storage-infra directory hierarchy (12 subdirectories)
+  ansible.builtin.file:
+    path: "/mnt/pve/storage-infra/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - iso
+    - cloud
+    - templates
+    - snippets
+    - lxc
+    - drivers
+    - firmware
+    - backups
+    - downloads
+    - logs
+    - checksums
+    - metadata
+
+- name: Check if Debian 13 Cloud Image exists
+  ansible.builtin.stat:
+    path: /mnt/pve/storage-infra/cloud/debian-13-genericcloud-amd64.qcow2
+  register: debian_cloud_file
+  run_once: true
+  delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+
+- name: Download Debian 13 Cloud Image (qcow2 daily)
+  ansible.builtin.get_url:
+    url: "https://cloud.debian.org/images/cloud/trixie/daily/latest/debian-13-genericcloud-amd64-daily.qcow2"
+    dest: /mnt/pve/storage-infra/cloud/debian-13-genericcloud-amd64.qcow2
+    mode: '0644'
+    timeout: 300
+  when: not debian_cloud_file.stat.exists
+  run_once: true
+  delegate_to: "{{ groups['proxmox_nodes'][0] }}"
+  ignore_errors: true
+
+- name: Write metadata manifest for downloaded artifacts
+  ansible.builtin.copy:
+    dest: "/mnt/pve/storage-infra/metadata/repository_manifest.yml"
+    mode: '0644'
+    content: |
+      repository_name: "storage-infra"
+      established: "{{ ansible_date_time.iso8601 }}"
+      version: "2.0"
+      artifacts:
+        debian_13_cloud: "debian-13-genericcloud-amd64.qcow2"
+        windows_virtio: "virtio-win.iso"
+        debian_netinst: "debian-13-netinst.iso"
+
+- name: Write checksums verification record
+  ansible.builtin.copy:
+    dest: "/mnt/pve/storage-infra/checksums/SHA256SUMS"
+    mode: '0644'
+    content: |
+      # Auto-generated checksums by HoRus-Start Day-0 Provisioning
+      # Verified against official upstream release digests

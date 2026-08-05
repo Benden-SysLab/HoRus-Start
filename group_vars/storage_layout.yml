@@ -1,0 +1,54 @@
+---
+# Persistent Storage Layout using /dev/disk/by-id/
+# Whole disk allocation (1 disk = 1 Proxmox Storage volume)
+storage_layout:
+  horus-pmx-node01:
+    os_disk_by_id: "/dev/disk/by-id/ata-KINGSTON_SA400S37240G_50026B7682D12345"
+    storages: []
+
+  horus-pmx-node02:
+    os_disk_by_id: "/dev/disk/by-id/ata-Crucial_CT120BX500SSD1_1948E2221234"
+    storages: []
+
+  horus-pmx-node03:
+    os_disk_by_id: "/dev/disk/by-id/ata-SanDisk_SDSSDA120G_181156801234"
+    storages:
+      - name: storage-casa
+        disk_model: "Seagate ST2000DM001"
+        serial: "Z4A123456"
+        by_id: "/dev/disk/by-id/ata-ST2000DM001_Z4A123456"
+        filesystem: ext4
+        mount: /mnt/pve/storage-casa
+        purpose: "CasaOS data, general files, persistent apps"
+        pve_content: ["images", "rootdir", "snippets"]
+
+      - name: storage-media
+        disk_model: "Seagate ST3000DM001"
+        serial: "Z1B654321"
+        by_id: "/dev/disk/by-id/ata-ST3000DM001_Z1B654321"
+        filesystem: ext4
+        mount: /mnt/pve/storage-media
+        purpose: "Media library archive"
+        pve_content: ["iso", "images"]
+
+      - name: storage-build-cache
+        disk_model: "WDC WD1003FZEX-00MK2A0"
+        serial: "WD-WCC3F1234567"
+        by_id: "/dev/disk/by-id/ata-WDC_WD1003FZEX-00MK2A0_WD-WCC3F1234567"
+        filesystem: ext4
+        mount: /mnt/pve/storage-build-cache
+        purpose: "Source projects, build workspace, compiler cache"
+        pve_content: ["images", "rootdir"]
+
+      - name: storage-infra
+        disk_model: "Samsung SSD 970 EVO Plus 1TB"
+        serial: "S4EWNF0M9876543"
+        by_id: "/dev/disk/by-id/nvme-Samsung_SSD_970_EVO_Plus_1TB_S4EWNF0M9876543"
+        filesystem: ext4
+        mount: /mnt/pve/storage-infra
+        purpose: "Infrastructure Repository (ISOs, Cloud Images, Drivers, Golden Templates, Backups)"
+        pve_content: ["iso", "vztmpl", "images", "rootdir", "backup", "snippets"]
+
+  horus-pmx-node04:
+    os_disk_by_id: "/dev/disk/by-id/ata-KINGSTON_SA400S37120G_50026B7682D99999"
+    storages: []

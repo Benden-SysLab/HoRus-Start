@@ -1,0 +1,204 @@
+---
+# 3.4 Storage Provisioning Engine Tasks: Executes Reconciliation Decisions
+# PURE EXECUTION ENGINE — ALL DECISION LOGIC IS DRIVEN BY PRE-COMPUTED NEEDS_* DECISION FLAGS
+
+- name: "3.4.0 [Provisioning Engine] Execute Reconciled Storage State Changes"
+  block:
+
+    # --------------------------------------------------------------------------
+    # LAYER 1: DISMANTLE, UNMOUNT & FILESYSTEM OPERATIONS
+    # --------------------------------------------------------------------------
+    - name: "3.4.1 [Provisioning - PVE Remove] Unregister Proxmox VE Storage"
+      ansible.builtin.command: "pvesm remove {{ item.name }}"
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_pvesm_remove | bool
+      failed_when: false
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.2 [Provisioning - Unmount] Stop and disable systemd mount unit"
+      ansible.builtin.systemd:
+        name: "{{ (item.mount_point | regex_replace('^/', '') | replace('-', '\\x2d') | replace('/', '-')) ~ '.mount' }}"
+        state: stopped
+        enabled: false
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_umount | bool
+      failed_when: false
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.3 [Provisioning - Unmount] Remove systemd mount unit files"
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ (item_path | regex_replace('^/', '') | replace('-', '\\x2d') | replace('/', '-')) ~ '.mount' }}"
+        state: absent
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      vars:
+        item_path: "{{ item.mount_point }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_umount | bool
+      failed_when: false
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.4 [Provisioning - Unmount] Unmount filesystem & remove fstab entry"
+      ansible.posix.mount:
+        path: "{{ item.mount_point }}"
+        state: absent
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_umount | bool
+      failed_when: false
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.5 [Provisioning - Wipe] Wipe filesystem signatures on removal"
+      ansible.builtin.command: "wipefs -a {{ item.device }}"
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_wipe_on_remove | bool
+      failed_when: false
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.6 [Provisioning - Format] Create filesystem on target storage device"
+      community.general.filesystem:
+        fstype: "{{ item.fstype | default('ext4') }}"
+        dev: "{{ item.device }}"
+        force: true
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_format | bool
+      tags: ['stage3', 'provision']
+
+    # --------------------------------------------------------------------------
+    # LAYER 2: MOUNT ENGINE & SYSTEMD UNITS (UUID PRIMARY IDENTIFIER)
+    # --------------------------------------------------------------------------
+    - name: "3.4.7 [Provisioning - Mount] Ensure mount point directory exists under /mnt/pve"
+      ansible.builtin.file:
+        path: "{{ item.mount_point }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_mkdir | bool
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.8 [Provisioning - Mount] Extract primary filesystem UUID of target storage devices"
+      ansible.builtin.command: "blkid -s UUID -o value {{ item.device }}"
+      register: target_reconciled_uuids_raw
+      changed_when: false
+      failed_when: false
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_systemd_mount | bool or item.needs_mount | bool
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.9 [Provisioning - Mount] Create PVE Systemd Mount Unit file (/etc/systemd/system/*.mount)"
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ (item.item.mount_point | regex_replace('^/', '') | replace('-', '\\x2d') | replace('/', '-')) ~ '.mount' }}"
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Mount storage volume {{ item.item.name }} under {{ item.item.mount_point }}
+          DefaultDependencies=no
+          Before=local-fs.target
+
+          [Mount]
+          What={{ ('UUID=' ~ item.stdout | trim) if (item.stdout is defined and item.stdout | trim != '') else (item.item.device_by_id | default(item.item.device)) }}
+          Where={{ item.item.mount_point }}
+          Type={{ item.item.fstype | default('ext4') }}
+          Options=defaults,noatime,nofail
+
+          [Install]
+          WantedBy=multi-user.target
+      loop: "{{ target_reconciled_uuids_raw.results | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.item is defined
+        - item.item.needs_systemd_mount | bool
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.10 [Provisioning - Mount] Enable and start PVE Systemd Mount Unit"
+      ansible.builtin.systemd:
+        name: "{{ (item.item.mount_point | regex_replace('^/', '') | replace('-', '\\x2d') | replace('/', '-')) ~ '.mount' }}"
+        daemon_reload: true
+        enabled: true
+        state: started
+      loop: "{{ target_reconciled_uuids_raw.results | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.item is defined
+        - item.item.needs_mount | bool
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.11 [Provisioning - Mount] Mount storage devices and persist UUID entries in /etc/fstab"
+      ansible.posix.mount:
+        path: "{{ item.item.mount_point }}"
+        src: "{{ ('UUID=' ~ item.stdout | trim) if (item.stdout is defined and item.stdout | trim != '') else (item.item.device_by_id | default(item.item.device)) }}"
+        fstype: "{{ item.item.fstype | default('ext4') }}"
+        opts: defaults,noatime,nofail
+        state: mounted
+      loop: "{{ target_reconciled_uuids_raw.results | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.item is defined
+        - item.item.needs_fstab | bool
+      tags: ['stage3', 'provision']
+
+    # --------------------------------------------------------------------------
+    # LAYER 3: PROXMOX REGISTRATION & SCOPING ENGINE (DRIVER AGNOSTIC)
+    # --------------------------------------------------------------------------
+    - name: "3.4.12 [Provisioning - PVE Register] Register storages in Proxmox VE (pvesm add)"
+      ansible.builtin.command: >
+        pvesm add {{ item.driver | default(item.type | default('dir')) }} {{ item.name }}
+        --path {{ item.mount_point }}
+        {% if item.shared | default(false) | bool %}--shared 1{% else %}--nodes {{ inventory_hostname }} --shared 0{% endif %}
+        --content {{ (item.content | default(['images', 'rootdir'])) | join(',') }}
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_pvesm_add | bool
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.13 [Provisioning - PVE Scoping] Update Proxmox storage access scoping (pvesm set)"
+      ansible.builtin.command: >
+        pvesm set {{ item.name }}
+        {% if item.shared | default(false) | bool %}--shared 1{% else %}--nodes {{ inventory_hostname }} --shared 0{% endif %}
+      loop: "{{ node_reconciled_targets | default([]) }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.needs_conversion | bool
+        - not (item.needs_pvesm_add | bool)
+      changed_when: true
+      failed_when: false
+      tags: ['stage3', 'provision']
+
+  rescue:
+    - name: "3.4.R1 [Provisioning Rescue] Handle Provisioning Failure & Log Recovery Diagnostics"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================================="
+          - "CRITICAL ERROR: Storage Provisioning task failed on {{ inventory_hostname }}!"
+          - "Initiating graceful failure capture & safety rollback check..."
+          - "=========================================================================="
+
+    - name: "3.4.R2 [Provisioning Rescue] Fail playbook with informative diagnostic message"
+      ansible.builtin.fail:
+        msg: "Storage Provisioning Engine encountered an error on {{ inventory_hostname }}. Check system logs above."
+
+  always:
+    - name: "3.4.A1 [Provisioning Summary] Display Provisioning Convergence Result"
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================================="
+          - "Stage 3.4 Provisioning Engine Execution Finished for {{ inventory_hostname }}"
+          - "Executed in Dry-Run / Skipped Mode: {{ cancel_provisioning | default(false) }}"
+          - "=========================================================================="
+      tags: ['stage3', 'provision']

@@ -1,0 +1,383 @@
+---
+# 3.2.5 Interactive Prompt Tasks per Discovered Disk
+# PERSISTS OPERATOR DESIRED STATE INTENT ONLY — DOES NOT EXECUTE SYSTEM COMMANDS OR RUNTIME CHECKS DIRECTLY.
+
+- name: "3.2.5.0 [Prompt] Check if disk {{ disk_item.device }} is already configured in existing_storage_matches"
+  ansible.builtin.set_fact:
+    matching_storage_entries: "{{ matching_entries_builder | from_json }}"
+  vars:
+    matching_entries_builder: >-
+      {%- set matches = [] -%}
+      {%- set d_dev = (disk_item.device | default('')) | string -%}
+      {%- set d_by_id = (disk_item.device_by_id | default('')) | string -%}
+      {%- set d_name = (disk_item.name | default('')) | string -%}
+      {%- set d_serial = (disk_item.serial | default('')) | string | trim -%}
+      {%- for st in (existing_storage_matches | default([])) -%}
+        {%- set st_dev = (st.device | default('')) | string -%}
+        {%- set is_match = false -%}
+        {%- if st_dev != '' -%}
+          {%- if st_dev == d_dev or (d_by_id != '' and st_dev == d_by_id) or (d_name != '' and st_dev.endswith('/' ~ d_name)) or (d_serial != '' and d_serial != 'N/A' and d_serial in st_dev) -%}
+            {%- set is_match = true -%}
+          {%- endif -%}
+        {%- endif -%}
+        {%- if is_match -%}
+          {%- set _ = matches.append(st) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ matches | to_json }}
+
+- name: "3.2.5.1 [Prompt] Evaluate matching storage entry for {{ disk_item.device }}"
+  ansible.builtin.set_fact:
+    is_already_added: "{{ (matching_storage_entries | length > 0) }}"
+    existing_storage_match: "{{ (matching_storage_entries | first) if (matching_storage_entries | length > 0) else {} }}"
+
+- name: "3.2.5.2a [Prompt] Ask operator template selection for disk {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: |
+      Select Storage Template for disk {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}, {{ disk_item.transport }}] on {{ inventory_hostname }}:
+        1) local-ai       (AI models and datasets storage)
+        2) local-images   (VM templates, ISOs and container images)
+        3) local-data     (General purpose persistent storage)
+        4) backup         (Backup repository for VM/CT snapshots)
+        5) advanced       (Custom options & parameters)
+        0) skip           (Do not configure this disk)
+      Select Option [1-5, 0] (default: 1):
+  register: prompt_template_choice
+  when:
+    - not (non_interactive | default(false) | bool)
+    - not (is_already_added | bool)
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.2b [Prompt] Ask operator action for existing disk {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "Disk {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}] is ALREADY CONFIGURED as '{{ existing_storage_match.name }}' (type: {{ existing_storage_match.type | default('dir') }}, shared: {{ existing_storage_match.shared | default(false) }}, mount: {{ existing_storage_match.mount_point }}). Select Action [keep / reconfigure / format / remove] (default: keep):"
+  register: prompt_existing_action
+  when:
+    - not (non_interactive | default(false) | bool)
+    - is_already_added | bool
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.3 [Prompt] Determine selected action & template for {{ disk_item.device }}"
+  ansible.builtin.set_fact:
+    selected_template: >-
+      {%- set choice = prompt_template_choice.user_input | default('1', true) | lower | trim -%}
+      {%- if choice in ['1', 'local-ai', 'ai'] -%}local-ai
+      {%- elif choice in ['2', 'local-images', 'images'] -%}local-images
+      {%- elif choice in ['3', 'local-data', 'data'] -%}local-data
+      {%- elif choice in ['4', 'backup'] -%}backup
+      {%- elif choice in ['5', 'advanced', 'custom'] -%}advanced
+      {%- else -%}skip
+      {%- endif -%}
+    raw_action: >-
+      {%- if non_interactive | default(false) | bool -%}
+        keep
+      {%- elif is_already_added | bool -%}
+        {%- set act = prompt_existing_action.user_input | default('keep', true) | lower | trim -%}
+        {%- if act in ['reconfigure', 'reconfig', 'r', 'edit'] -%}reconfigure
+        {%- elif act in ['format', 'fmt', 'f'] -%}format
+        {%- elif act in ['remove', 'delete', 'del', 'rm'] -%}remove
+        {%- else -%}keep
+        {%- endif -%}
+      {%- else -%}
+        {%- set choice = prompt_template_choice.user_input | default('1', true) | lower | trim -%}
+        {%- if choice in ['0', 'skip', 'no', 'n'] -%}skip
+        {%- else -%}configure
+        {%- endif -%}
+      {%- endif -%}
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.3b [Prompt] Derive action flags"
+  ansible.builtin.set_fact:
+    use_this_disk: "{{ raw_action in ['configure', 'reconfigure', 'format'] }}"
+    is_remove_requested: "{{ raw_action == 'remove' }}"
+    is_keep_action: "{{ raw_action == 'keep' }}"
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.3c [Prompt] Retain existing storage configuration for {{ disk_item.device }}"
+  ansible.builtin.set_fact:
+    prompted_node_storages: "{{ (prompted_node_storages | default([])) + [existing_storage_match | combine({'state': 'present', 'force_format': false})] }}"
+  when: is_keep_action | bool
+  tags: ['stage3', 'wizard']
+
+# --------------------------------------------------------------------------
+# DESIRED STATE INTENT COLLECTION FOR REMOVAL
+# --------------------------------------------------------------------------
+- name: "3.2.5.RM1 [Prompt] Confirmation for Removal of {{ existing_storage_match.name if (is_already_added | bool) else disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "WARNING: Are you sure you want to mark storage '{{ existing_storage_match.name if (is_already_added | bool) else disk_item.device }}' for REMOVAL? [y/N]:"
+  register: prompt_remove_confirm_1
+  when:
+    - not (non_interactive | default(false) | bool)
+    - is_remove_requested | bool
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.RM2 [Prompt] Double Confirmation (TYPE 'REMOVE') for Removal"
+  ansible.builtin.pause:
+    prompt: "DOUBLE CONFIRMATION: Type 'REMOVE' in uppercase to confirm removing storage '{{ existing_storage_match.name if (is_already_added | bool) else disk_item.device }}':"
+  register: prompt_remove_confirm_2
+  when:
+    - not (non_interactive | default(false) | bool)
+    - is_remove_requested | bool
+    - prompt_remove_confirm_1.user_input is defined
+    - (prompt_remove_confirm_1.user_input | default('n') | lower | trim) in ['y', 'yes', 'da', 'д', '1']
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.RM3 [Prompt] Select Format / Wipe Intent Option Before Removal"
+  ansible.builtin.pause:
+    prompt: "Do you want to request WIPE / FORMAT of disk {{ disk_item.device }} during removal, or unmount WITHOUT formatting? [format / UNMOUNT_ONLY] (default: unmount_only):"
+  register: prompt_remove_wipe_option
+  when:
+    - not (non_interactive | default(false) | bool)
+    - is_remove_requested | bool
+    - prompt_remove_confirm_1.user_input is defined
+    - (prompt_remove_confirm_1.user_input | default('n') | lower | trim) in ['y', 'yes', 'da', 'д', '1']
+    - prompt_remove_confirm_2.user_input is defined
+    - (prompt_remove_confirm_2.user_input | default('') | upper | trim) == 'REMOVE'
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.RM4 [Prompt] Double Confirmation FOR FORMAT (TYPE 'WIPE') Before Removal"
+  ansible.builtin.pause:
+    prompt: "DOUBLE CONFIRMATION FOR FORMAT: Type 'WIPE' in uppercase to confirm authorizing erasure of disk {{ disk_item.device }} during removal:"
+  register: prompt_remove_wipe_confirm
+  when:
+    - not (non_interactive | default(false) | bool)
+    - is_remove_requested | bool
+    - prompt_remove_confirm_1.user_input is defined
+    - (prompt_remove_confirm_1.user_input | default('n') | lower | trim) in ['y', 'yes', 'da', 'д', '1']
+    - prompt_remove_confirm_2.user_input is defined
+    - (prompt_remove_confirm_2.user_input | default('') | upper | trim) == 'REMOVE'
+    - prompt_remove_wipe_option.user_input is defined
+    - (prompt_remove_wipe_option.user_input | default('') | lower | trim) in ['format', 'wipe', 'f', 'w']
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.RM5 [Prompt] Evaluate Removal & Wipe Operator Intent Flags"
+  ansible.builtin.set_fact:
+    is_removal_confirmed: >-
+      {{
+        (is_remove_requested | bool) and
+        (prompt_remove_confirm_1.user_input is defined) and
+        ((prompt_remove_confirm_1.user_input | default('n') | lower | trim) in ['y', 'yes', 'da', 'д', '1']) and
+        (prompt_remove_confirm_2.user_input is defined) and
+        ((prompt_remove_confirm_2.user_input | default('') | upper | trim) == 'REMOVE')
+      }}
+    is_remove_wipe_confirmed: >-
+      {{
+        (is_remove_requested | bool) and
+        (prompt_remove_wipe_option.user_input is defined) and
+        ((prompt_remove_wipe_option.user_input | default('') | lower | trim) in ['format', 'wipe', 'f', 'w']) and
+        (prompt_remove_wipe_confirm.user_input is defined) and
+        ((prompt_remove_wipe_confirm.user_input | default('') | upper | trim) == 'WIPE')
+      }}
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.RM6 [Prompt] Persist Removal Intent into Desired Storage Topology"
+  ansible.builtin.set_fact:
+    prompted_node_storages: >-
+      {{
+        (prompted_node_storages | default([])) + [{
+          'name': existing_storage_match.name if (is_already_added | bool and existing_storage_match.name is defined) else (inventory_hostname ~ '-storage-' ~ disk_item.name),
+          'type': existing_storage_match.type | default('dir'),
+          'shared': existing_storage_match.shared | default(false),
+          'device': disk_item.device_by_id | default(disk_item.device),
+          'mount_point': existing_storage_match.mount_point | default('/mnt/pve/' ~ (existing_storage_match.name if (is_already_added | bool and existing_storage_match.name is defined) else (inventory_hostname ~ '-storage-' ~ disk_item.name))),
+          'fstype': existing_storage_match.fstype | default('ext4'),
+          'content': existing_storage_match.content | default(['images', 'rootdir']),
+          'purpose': existing_storage_match.purpose | default('Storage targeted for removal'),
+          'force_format': is_remove_wipe_confirmed | bool,
+          'state': 'absent'
+        }]
+      }}
+  when:
+    - is_remove_requested | bool
+    - is_removal_confirmed | bool
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.RM7 [Prompt] Fallback: Retain existing storage if removal confirmation failed"
+  ansible.builtin.set_fact:
+    prompted_node_storages: "{{ (prompted_node_storages | default([])) + [existing_storage_match | combine({'state': 'present', 'force_format': false})] }}"
+  when:
+    - is_remove_requested | bool
+    - not (is_removal_confirmed | bool)
+  tags: ['stage3', 'wizard']
+
+# --------------------------------------------------------------------------
+# CONFIGURATION / RECONFIGURATION INTENT COLLECTION (ADVANCED MODE ONLY)
+# --------------------------------------------------------------------------
+- name: "3.2.5.4a [Prompt] Collect Storage Name for {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "Enter Storage Name for {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}] (default: {{ existing_storage_match.name if (is_already_added | bool and existing_storage_match.name is defined) else (inventory_hostname ~ '-storage-' ~ disk_item.name) }}):"
+  register: prompt_name
+  when:
+    - use_this_disk | bool
+    - selected_template == 'advanced'
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.4b [Prompt] Collect Filesystem Type for {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "Select Filesystem Type for {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}] [ext4 / xfs] (default: {{ existing_storage_match.fstype if (is_already_added | bool and existing_storage_match.fstype is defined) else 'ext4' }}):"
+  register: prompt_fstype
+  when:
+    - use_this_disk | bool
+    - selected_template == 'advanced'
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.4c [Prompt] Collect Proxmox Storage Backend Driver for {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "Select Proxmox Storage Backend Driver for {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}] [dir / lvm / zfspool] (default: {{ existing_storage_match.type if (is_already_added | bool and existing_storage_match.type is defined) else 'dir' }}):"
+  register: prompt_type
+  when:
+    - use_this_disk | bool
+    - selected_template == 'advanced'
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.4d [Prompt] Collect Proxmox Access Scope (Shared across cluster) for {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "Is storage on {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}] shared across cluster nodes? [y/N] (default: {{ 'y' if (is_already_added | bool and existing_storage_match.shared | default(false) | bool) else 'n' }}):"
+  register: prompt_shared
+  when:
+    - use_this_disk | bool
+    - selected_template == 'advanced'
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.5 [Prompt] Collect Mount Point for {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "Enter Mount Point for {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}] (default: {{ existing_storage_match.mount_point if (is_already_added | bool and existing_storage_match.mount_point is defined) else ('/mnt/pve/storage-' ~ disk_item.name) }}):"
+  register: prompt_mount
+  when:
+    - use_this_disk | bool
+    - selected_template == 'advanced'
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.7 [Prompt] Collect PVE Content Types for {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "Enter PVE Content Types for {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}] comma-separated [images,rootdir,iso,vztmpl,backup] (default: {{ (existing_storage_match.content | default(['images', 'rootdir'])) | join(',') }}):"
+  register: prompt_content
+  when:
+    - use_this_disk | bool
+    - selected_template == 'advanced'
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.8 [Prompt] Collect Storage Purpose Description for {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "Enter Description for {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}] (default: {{ existing_storage_match.purpose if (is_already_added | bool and existing_storage_match.purpose is defined) else ('Proxmox storage volume on ' ~ disk_item.device) }}):"
+  register: prompt_purpose
+  when:
+    - use_this_disk | bool
+    - selected_template == 'advanced'
+  tags: ['stage3', 'wizard']
+
+# --------------------------------------------------------------------------
+# FORMAT AUTHORIZATION PROPOSAL WITH DOUBLE CONFIRMATION
+# --------------------------------------------------------------------------
+- name: "3.2.5.FMT1 [Prompt] Ask whether to AUTHORIZE FORCE FORMAT / WIPE on disk {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "Do you want to AUTHORIZE FORCE FORMAT / WIPE on disk {{ disk_item.device }} [Model: {{ disk_item.model }}, Size: {{ disk_item.size }}]? WARNING: ALL DATA WILL BE ERASED IF FORMATTED! [y/N]:"
+  register: prompt_format_option
+  when:
+    - not (non_interactive | default(false) | bool)
+    - use_this_disk | bool
+    - raw_action != 'format'
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.FMT2 [Prompt] Double Confirmation FOR FORMAT (TYPE 'FORMAT') for disk {{ disk_item.device }}"
+  ansible.builtin.pause:
+    prompt: "DOUBLE CONFIRMATION FOR FORMAT: Type 'FORMAT' in uppercase to authorize erasure of disk {{ disk_item.device }}:"
+  register: prompt_format_confirm
+  when:
+    - not (non_interactive | default(false) | bool)
+    - use_this_disk | bool
+    - (raw_action == 'format') or (prompt_format_option.user_input is defined and ((prompt_format_option.user_input | default('n') | lower | trim) in ['y', 'yes', 'da', 'д', '1']))
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.9a [Prompt] Set Default Variables & Evaluate Format Intent for {{ disk_item.device }}"
+  ansible.builtin.set_fact:
+    raw_type_input: "{{ (prompt_type.user_input if prompt_type is defined else '') | default('', true) | lower | trim }}"
+    raw_fstype_input: "{{ (prompt_fstype.user_input if prompt_fstype is defined else '') | default('', true) | lower | trim }}"
+    raw_shared_input: "{{ (prompt_shared.user_input if prompt_shared is defined else '') | default('', true) | lower | trim }}"
+    default_name_val: >-
+      {%- if selected_template == 'local-ai' -%}storage-ai-{{ inventory_hostname }}
+      {%- elif selected_template == 'local-images' -%}storage-images-{{ inventory_hostname }}
+      {%- elif selected_template == 'local-data' -%}storage-data-{{ inventory_hostname }}
+      {%- elif selected_template == 'backup' -%}storage-backup-{{ inventory_hostname }}
+      {%- else -%}{{ existing_storage_match.name if (is_already_added | bool and existing_storage_match.name is defined) else ('storage-' ~ disk_item.name ~ '-' ~ inventory_hostname) }}
+      {%- endif -%}
+    default_type_val: "{{ existing_storage_match.type if (is_already_added | bool and existing_storage_match.type is defined) else 'dir' }}"
+    default_shared_val: "{{ existing_storage_match.shared if (is_already_added | bool and existing_storage_match.shared is defined) else false }}"
+    default_mount_val: >-
+      {%- if selected_template == 'local-ai' -%}/mnt/pve/storage-ai-{{ inventory_hostname }}
+      {%- elif selected_template == 'local-images' -%}/mnt/pve/storage-images-{{ inventory_hostname }}
+      {%- elif selected_template == 'local-data' -%}/mnt/pve/storage-data-{{ inventory_hostname }}
+      {%- elif selected_template == 'backup' -%}/mnt/pve/storage-backup-{{ inventory_hostname }}
+      {%- else -%}{{ existing_storage_match.mount_point if (is_already_added | bool and existing_storage_match.mount_point is defined) else ('/mnt/pve/storage-' ~ disk_item.name) }}
+      {%- endif -%}
+    default_fstype_val: "{{ existing_storage_match.fstype if (is_already_added | bool and existing_storage_match.fstype is defined) else 'ext4' }}"
+    default_content_val: >-
+      {%- if selected_template == 'local-ai' -%}{%- set c = ['images', 'rootdir'] -%}
+      {%- elif selected_template == 'local-images' -%}{%- set c = ['images', 'vztmpl', 'iso'] -%}
+      {%- elif selected_template == 'local-data' -%}{%- set c = ['images', 'rootdir', 'snippets'] -%}
+      {%- elif selected_template == 'backup' -%}{%- set c = ['backup'] -%}
+      {%- else -%}{%- set c = existing_storage_match.content if (is_already_added | bool and existing_storage_match.content is defined) else ['images', 'rootdir'] -%}
+      {%- endif -%}{{ c }}
+    default_purpose_val: >-
+      {%- if selected_template == 'local-ai' -%}AI models and datasets storage
+      {%- elif selected_template == 'local-images' -%}VM templates and container images
+      {%- elif selected_template == 'local-data' -%}General purpose persistent storage volume
+      {%- elif selected_template == 'backup' -%}Backup repository for VM and CT snapshots
+      {%- else -%}{{ existing_storage_match.purpose if (is_already_added | bool and existing_storage_match.purpose is defined) else ('Proxmox storage volume on ' ~ disk_item.device) }}
+      {%- endif -%}
+    is_force_format_confirmed: >-
+      {{
+        ((raw_action == 'format') or (prompt_format_option.user_input is defined and ((prompt_format_option.user_input | default('n') | lower | trim) in ['y', 'yes', 'da', 'д', '1'])))
+        and (prompt_format_confirm.user_input is defined)
+        and ((prompt_format_confirm.user_input | default('') | upper | trim) == 'FORMAT')
+      }}
+  when: use_this_disk | bool
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.9b [Prompt] Compute Final Prompt Variables for Constructing Desired State Object"
+  ansible.builtin.set_fact:
+    calculated_name: "{{ (prompt_name.user_input if prompt_name is defined and prompt_name.user_input is defined and prompt_name.user_input | trim != '') | default(default_name_val, true) | trim }}"
+    calculated_fstype: >-
+      {%- if raw_fstype_input in ['xfs'] -%}xfs
+      {%- elif raw_fstype_input in ['ext4'] -%}ext4
+      {%- else -%}{{ default_fstype_val }}
+      {%- endif -%}
+    calculated_type: >-
+      {%- if raw_type_input in ['lvm', 'lvmthin'] -%}lvm
+      {%- elif raw_type_input in ['zfs', 'zfspool'] -%}zfspool
+      {%- elif raw_type_input in ['dir', 'directory', 'xfs', 'ext4'] or raw_type_input == '' -%}dir
+      {%- else -%}{{ default_type_val }}
+      {%- endif -%}
+    calculated_shared: >-
+      {%- set eff_type = raw_type_input if raw_type_input != '' else default_type_val -%}
+      {%- if eff_type in ['nfs', 'cifs', 'cephfs', 'pbs', 'rbd'] -%}
+        {%- if raw_shared_input in ['y', 'yes', 'true', '1'] -%}true
+        {%- elif raw_shared_input in ['n', 'no', 'false', '0'] -%}false
+        {%- else -%}{{ default_shared_val | bool }}
+        {%- endif -%}
+      {%- else -%}
+        false
+      {%- endif -%}
+    calculated_mount: "{{ (prompt_mount.user_input if prompt_mount is defined and prompt_mount.user_input is defined and prompt_mount.user_input | trim != '') | default(default_mount_val, true) | trim }}"
+    calculated_content: "{{ (prompt_content.user_input | split(',')) if (prompt_content is defined and prompt_content.user_input is defined and prompt_content.user_input | trim != '') else default_content_val }}"
+    calculated_purpose: "{{ (prompt_purpose.user_input if prompt_purpose is defined and prompt_purpose.user_input is defined and prompt_purpose.user_input | trim != '') | default(default_purpose_val, true) | trim }}"
+  when: use_this_disk | bool
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.5.10 [Prompt] Append Configured Storage Target Desired State to prompted_node_storages"
+  ansible.builtin.set_fact:
+    prompted_node_storages: >-
+      {{ (prompted_node_storages | default([])) + [{
+        'name': calculated_name,
+        'type': calculated_type,
+        'shared': calculated_shared | bool,
+        'device': disk_item.device_by_id | default(disk_item.device),
+        'mount_point': calculated_mount,
+        'fstype': calculated_fstype,
+        'content': calculated_content,
+        'purpose': calculated_purpose,
+        'force_format': is_force_format_confirmed | bool,
+        'state': 'present'
+      }] }}
+  when: use_this_disk | bool
+  tags: ['stage3', 'wizard']

@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReportRuntimeObject",
+  "description": "JSON Schema for HoRus-Start Runtime API v1 Report Objects",
+  "type": "object",
+  "required": ["api_version", "schema_version", "producer", "resource_type", "stage", "status", "executed_at", "dry_run", "health", "nodes"],
+  "properties": {
+    "api_version": {
+      "type": "string",
+      "enum": ["v1"]
+    },
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "producer": {
+      "type": "string"
+    },
+    "resource_type": {
+      "type": "string",
+      "enum": ["report"]
+    },
+    "stage": {
+      "type": "integer"
+    },
+    "status": {
+      "type": "string"
+    },
+    "executed_at": {
+      "type": "string"
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "health": {
+      "type": "object"
+    },
+    "nodes": {
+      "type": "object"
+    }
+  }
+}

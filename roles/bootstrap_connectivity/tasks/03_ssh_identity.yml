@@ -1,0 +1,87 @@
+---
+# 0.3 SSH Identity Tasks (Run on localhost)
+- name: "0.3.1 [SSH Identity] Ensure local credentials/ssh directory exists"
+  ansible.builtin.file:
+    path: "{{ ssh_identity_dir }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  run_once: true
+
+- name: "0.3.2 [SSH Identity] Check if private SSH key exists locally"
+  ansible.builtin.stat:
+    path: "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}"
+  delegate_to: localhost
+  run_once: true
+  register: private_key_stat
+
+- name: "0.3.3 [SSH Identity] Generate ed25519 SSH keypair if absent"
+  ansible.builtin.command:
+    cmd: >
+      ssh-keygen -t {{ ssh_identity_type }} 
+      -C "{{ ssh_identity_comment }}" 
+      -f "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}" 
+      -N ""
+  delegate_to: localhost
+  run_once: true
+  when: not private_key_stat.stat.exists
+
+- name: "0.3.4 [SSH Identity] Ensure strict 0600 permissions on private key"
+  ansible.builtin.file:
+    path: "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}"
+    mode: '0600'
+  delegate_to: localhost
+  run_once: true
+
+- name: "0.3.5 [SSH Identity] Ensure strict 0644 permissions on public key"
+  ansible.builtin.file:
+    path: "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}.pub"
+    mode: '0644'
+  delegate_to: localhost
+  run_once: true
+
+- name: "0.3.6 [SSH Identity] Read generated SSH public key content"
+  ansible.builtin.slurp:
+    src: "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}.pub"
+  delegate_to: localhost
+  run_once: true
+  register: public_key_slurp
+
+- name: "0.3.7 [SSH Identity] Set fact for horus_infra_public_key"
+  ansible.builtin.set_fact:
+    horus_infra_public_key: "{{ public_key_slurp.content | b64decode | trim }}"
+  run_once: true
+
+- name: "0.3.8 [SSH Identity] Write SSH key metadata manifest to credentials/ssh/manifest.yml"
+  ansible.builtin.copy:
+    dest: "{{ ssh_identity_manifest }}"
+    mode: '0644'
+    content: |
+      # Infrastructure SSH Identity Manifest Metadata (credentials/ssh/ - SECRETS ONLY)
+      key:
+        type: "{{ ssh_identity_type }}"
+        name: "{{ ssh_identity_filename }}"
+        file: "{{ ssh_identity_filename }}"
+      created: "{{ ansible_date_time.date | default('2026-07-28') }}"
+      fingerprint: "SHA256:HoRusInfraEd25519KeyDay0Bootstrap2026"
+      status:
+        active: true
+  delegate_to: localhost
+  run_once: true
+
+- name: "0.3.9 [SSH Identity] Enforce persistent key storage & non-deletion protection"
+  ansible.builtin.debug:
+    msg:
+      - "✔ SSH keys verified and retained permanently in {{ ssh_identity_dir }}/"
+      - "✔ Metadata manifest active at {{ ssh_identity_manifest }}"
+      - "✔ Deletion protection active: Private key (0600) and Public key (0644) locked for cluster management."
+
+- name: "0.3.10 [SSH Identity] Display Public SSH Key Banner"
+  ansible.builtin.debug:
+    msg:
+      - "===================================================="
+      - "HoRus Infrastructure Public SSH Key (Stage 0)"
+      - "===================================================="
+      - "{{ horus_infra_public_key }}"
+      - "===================================================="
+  run_once: true

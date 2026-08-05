@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DiscoveryRuntimeObject",
+  "description": "JSON Schema for HoRus-Start Runtime API v1 Discovery Objects",
+  "type": "object",
+  "required": ["api_version", "schema_version", "producer", "resource_type", "stage", "step", "timestamp", "nodes"],
+  "properties": {
+    "api_version": {
+      "type": "string",
+      "enum": ["v1"]
+    },
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "producer": {
+      "type": "string"
+    },
+    "resource_type": {
+      "type": "string",
+      "enum": ["discovery"]
+    },
+    "stage": {
+      "type": "integer"
+    },
+    "step": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string"
+    },
+    "nodes": {
+      "type": "object"
+    }
+  }
+}

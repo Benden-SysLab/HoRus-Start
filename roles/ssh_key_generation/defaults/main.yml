@@ -1,0 +1,4 @@
+---
+horus_ssh_key_dir: "{{ playbook_dir }}/../vault_ssh_key"
+horus_ssh_key_name: "id_ed25519_horus_infra"
+horus_ssh_key_type: "ed25519"

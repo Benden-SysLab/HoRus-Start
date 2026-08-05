@@ -1,0 +1,138 @@
+# ==============================================================================
+# HoRus-Start Stage 4: Golden Image Factory Configuration (config/templates.yml)
+# Single Source of Truth for Package Profiles (Layers) and Proxmox VE VM Templates
+# ==============================================================================
+
+factory_settings:
+  vmid_start: 9000
+  builder_node_index: 2
+  default_revision: "1.0"
+  enable_clone_test: false
+  force_rebuild: false
+  builder_name: "HoRus Stage 4 Golden Image Factory"
+
+package_profiles:
+  core:
+    description: "Essential OS runtime, guest agents & management utilities (Installed ALWAYS)"
+    packages:
+      - sudo
+      - qemu-guest-agent
+      - cloud-init
+      - cloud-guest-utils
+      - bash-completion
+      - vim
+      - curl
+      - wget
+      - git
+      - rsync
+      - ca-certificates
+      - chrony
+      - jq
+      - python3
+      - python3-apt
+
+  sre:
+    description: "Operational, diagnostic, performance monitoring & troubleshooting tools"
+    packages:
+      - btop
+      - ncdu
+      - tree
+      - unzip
+      - zip
+      - tar
+      - lsof
+      - strace
+      - iproute2
+      - dnsutils
+      - ethtool
+      - iperf3
+      - pciutils
+      - usbutils
+      - tcpdump
+      - traceroute
+      - net-tools
+
+  developer:
+    description: "Build tools, compilers and runtime environments for CI/CD & Dev"
+    packages:
+      - python3-pip
+      - python3-venv
+      - gcc
+      - g++
+      - make
+
+  storage:
+    description: "Disk management, LVM, and filesystem utilities for storage nodes"
+    packages:
+      - lvm2
+      - xfsprogs
+      - e2fsprogs
+      - gdisk
+      - parted
+
+  network:
+    description: "Networking, VPN and routing tools"
+    packages:
+      - wireguard-tools
+      - bridge-utils
+      - vlan
+
+  database:
+    description: "Database diagnostics and NUMA/CPU tuning utilities"
+    packages:
+      - sysstat
+      - numactl
+
+golden_templates:
+  - name: debian13-minimal
+    vmid: 9000
+    os: debian13
+    revision: "1.0"
+    status: "RELEASED"
+    cloud_url: "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+    storage: "storage-infra"
+    memory: 2048
+    cores: 2
+    profiles:
+      - core
+
+  - name: debian13-standard
+    vmid: 9001
+    os: debian13
+    revision: "1.0"
+    status: "RELEASED"
+    cloud_url: "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+    storage: "storage-infra"
+    memory: 2048
+    cores: 2
+    profiles:
+      - core
+      - sre
+
+  - name: debian13-developer
+    vmid: 9002
+    os: debian13
+    revision: "1.0"
+    status: "RELEASED"
+    cloud_url: "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+    storage: "storage-infra"
+    memory: 4096
+    cores: 4
+    profiles:
+      - core
+      - sre
+      - developer
+
+  - name: debian13-storage
+    vmid: 9003
+    os: debian13
+    revision: "1.0"
+    status: "RELEASED"
+    cloud_url: "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+    storage: "storage-infra"
+    memory: 2048
+    cores: 2
+    profiles:
+      - core
+      - sre
+      - storage

@@ -1,0 +1,13 @@
+template:
+  name: local-data
+  description: General purpose persistent storage volume
+
+storage:
+  type: local
+  filesystem: ext4
+  content:
+    - images
+    - rootdir
+    - snippets
+  mount_base: /mnt/pve
+  wipe: false

@@ -1,0 +1,6 @@
+---
+# Stage 3 Storage Prepare Default Variables
+storage_node_mappings: {}
+storage_plan_only: false
+force_wizard: false
+non_interactive: false

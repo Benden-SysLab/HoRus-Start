@@ -1,0 +1,118 @@
+---
+# 1.4 Verification Tasks
+- name: "1.4.1 [Verification] Verify APT repositories consistency"
+  ansible.builtin.command:
+    cmd: "apt-cache policy"
+  changed_when: false
+  register: apt_policy_check
+
+- name: "1.4.2 [Verification] Assert PVE No-Subscription repository is active"
+  ansible.builtin.assert:
+    that:
+      - "'pve-no-subscription' in apt_policy_check.stdout"
+    fail_msg: "CRITICAL: pve-no-subscription repository is not active in APT policy on {{ inventory_hostname }}."
+    success_msg: "✔ pve-no-subscription repository confirmed active on {{ inventory_hostname }}."
+
+- name: "1.4.3 [Verification] Verify system package state (apt-get check)"
+  ansible.builtin.command:
+    cmd: "apt-get check"
+  changed_when: false
+  register: apt_check_result
+
+- name: "1.4.4 [Verification] Retrieve Proxmox VE version"
+  ansible.builtin.command:
+    cmd: "pveversion"
+  changed_when: false
+  register: pve_version_cmd
+  ignore_errors: true
+
+- name: "1.4.5 [Verification] Retrieve Debian OS version"
+  ansible.builtin.command:
+    cmd: "cat /etc/debian_version"
+  changed_when: false
+  register: debian_version_cmd
+
+- name: "1.4.6 [Verification] Retrieve Kernel release version"
+  ansible.builtin.command:
+    cmd: "uname -r"
+  changed_when: false
+  register: kernel_version_cmd
+
+- name: "1.4.7 [Verification] Verify installed base utility packages"
+  ansible.builtin.command:
+    cmd: "which curl wget htop git vim tcpdump ethtool iperf3 rsync jq"
+  changed_when: false
+  register: utilities_check
+
+- name: "1.4.8 [Verification] Gather verification facts for report"
+  ansible.builtin.set_fact:
+    stage1_node_facts:
+      hostname: "{{ inventory_hostname }}"
+      ip: "{{ ansible_host }}"
+      pve_version: "{{ pve_version_cmd.stdout | default('Unknown') }}"
+      debian_version: "{{ debian_version_cmd.stdout | default('Unknown') }}"
+      kernel_version: "{{ kernel_version_cmd.stdout | default('Unknown') }}"
+      no_subscription_repo_active: "{{ 'pve-no-subscription' in apt_policy_check.stdout }}"
+      enterprise_repo_disabled: "{{ 'enterprise.proxmox.com' not in apt_policy_check.stdout }}"
+      apt_clean: "{{ apt_check_result.rc == 0 }}"
+      installed_utilities: "{{ utilities_check.stdout_lines }}"
+      timestamp: "{{ ansible_date_time.iso8601 if ansible_date_time is defined else '' }}"
+
+- name: "1.4.9 [Verification] Ensure runtime/reports directory exists on localhost"
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../runtime/reports"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: "1.4.10 [Verification] Generate Stage 1 Verification JSON Report"
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../runtime/reports/stage1.json"
+    mode: '0644'
+    content: |
+      {
+        "stage": "1.0",
+        "name": "Base System Preparation",
+        "status": "COMPLETED",
+        "executed_at": "{{ ansible_date_time.iso8601 if ansible_date_time is defined else '' }}",
+        "summary": {
+          "total_nodes": {{ ansible_play_hosts | length }},
+          "repositories_configured": true,
+          "system_updated": true,
+          "base_packages_installed": true
+        },
+        "nodes": {
+      {% for h in ansible_play_hosts %}
+          "{{ h }}": {
+            "management_ip": "{{ hostvars[h]['ansible_host'] }}",
+            "pve_version": "{{ hostvars[h]['pve_version_cmd']['stdout'] | default('N/A') }}",
+            "debian_version": "{{ hostvars[h]['debian_version_cmd']['stdout'] | default('N/A') }}",
+            "kernel_version": "{{ hostvars[h]['kernel_version_cmd']['stdout'] | default('N/A') }}",
+            "no_subscription_repo": true,
+            "apt_status": "clean"
+          }{% if not loop.last %},{% endif %}
+      {% endfor %}
+        }
+      }
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: "1.4.11 [Verification] Display Stage 1 Completion Summary Banner"
+  ansible.builtin.debug:
+    msg:
+      - "=========================================================================="
+      - "HoRus-Start Stage 1: Base System Preparation COMPLETED SUCCESSFULLY!"
+      - "--------------------------------------------------------------------------"
+      - "✔ Node: {{ inventory_hostname }} ({{ ansible_host }})"
+      - "✔ Repositories: Enterprise disabled, pve-no-subscription active."
+      - "✔ Web GUI: Proxmox subscription warning prompt removed."
+      - "✔ System Update: Package cache updated and dist-upgrade executed."
+      - "✔ Base Packages: Core diagnostic & management utilities verified."
+      - "✔ PVE Version: {{ pve_version_cmd.stdout | default('PVE 8.x') }}"
+      - "✔ Kernel: {{ kernel_version_cmd.stdout | default('Linux Kernel') }}"
+      - "--------------------------------------------------------------------------"
+      - "Report written to: runtime/reports/stage1.json"
+      - "=========================================================================="

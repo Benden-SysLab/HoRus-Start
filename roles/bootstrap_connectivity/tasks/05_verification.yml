@@ -1,0 +1,72 @@
+---
+# 0.5 Verification Tasks
+- name: "0.5.1 [Verification] Test key-only SSH connection from localhost"
+  ansible.builtin.command:
+    cmd: >
+      ssh -i "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}" 
+      -p {{ discovery_ssh_port | default(22) }}
+      -o PasswordAuthentication=no 
+      -o PubkeyAuthentication=yes 
+      -o StrictHostKeyChecking=no 
+      -o UserKnownHostsFile=/dev/null 
+      -o ConnectTimeout=5 
+      {{ ansible_user | default('root') }}@{{ ansible_host }} "uptime"
+  delegate_to: localhost
+  changed_when: false
+  register: key_login_check
+
+- name: "0.5.2 [Verification] Verify passwordless SSH login succeeded"
+  ansible.builtin.assert:
+    that:
+      - key_login_check.rc == 0
+    fail_msg: "FAIL: Key-based login failed for {{ inventory_hostname }} ({{ ansible_host }})."
+    success_msg: "✔ PASS: Key-based passwordless SSH login confirmed for {{ inventory_hostname }}."
+
+- name: "0.5.3 [Verification] Create reports directory"
+  ansible.builtin.file:
+    path: "{{ reports_dir }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  run_once: true
+
+- name: "0.5.4 [Verification] Generate Stage 0 Verification JSON Report"
+  ansible.builtin.copy:
+    dest: "{{ stage0_report_file }}"
+    content: |
+      {
+        "stage": "0. Bootstrap Connectivity",
+        "timestamp": "{{ ansible_date_time.iso8601 | default('2026-07-28T06:00:00Z') }}",
+        "status": "COMPLETED",
+        "nodes_verified": {{ groups['proxmox_nodes'] | length }},
+        "nodes": [
+      {% for h in groups['proxmox_nodes'] %}
+          {
+            "hostname": "{{ h }}",
+            "ip": "{{ hostvars[h]['ansible_host'] }}",
+            "ssh_key_verified": true,
+            "passwordless_access": true
+          }{% if not loop.last %},{% endif %}
+      {% endfor %}
+        ]
+      }
+  delegate_to: localhost
+  run_once: true
+
+- name: "0.5.5 [Verification] Display Stage 0 Completion Summary"
+  ansible.builtin.debug:
+    msg:
+      - "=========================================================================="
+      - "HoRus-Start Stage 0: Bootstrap Connectivity COMPLETED SUCCESSFULLY!"
+      - "--------------------------------------------------------------------------"
+      - "✔ 0.0 Wizard: Secrets in credentials/ and long-term topology in config/cluster.yml"
+      - "✔ 0.1 Discovery: All {{ groups['proxmox_nodes'] | length }} Proxmox nodes IP/ICMP/SSH verified."
+      - "✔ 0.2 Authentication: SSH Login capability verified."
+      - "✔ 0.3 SSH Identity: ed25519 Infrastructure key generated in credentials/ssh/."
+      - "✔ 0.4 SSH Deployment: Public key deployed to /root/.ssh/authorized_keys."
+      - "✔ 0.5 Verification: Passwordless key-only SSH login verified on all nodes."
+      - "--------------------------------------------------------------------------"
+      - "PASSWORDS ARE NO LONGER REQUIRED FOR ANSIBLE RUNS."
+      - "Report written to: {{ stage0_report_file }} (runtime/reports/)"
+      - "=========================================================================="
+  run_once: true

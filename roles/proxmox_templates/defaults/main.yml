@@ -1,0 +1,4 @@
+---
+debian13_cloud_url: "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+debian13_filename: "debian-13-genericcloud-amd64.qcow2"
+target_storage_dir: "/mnt/pve/storage-infra"

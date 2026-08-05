@@ -1,0 +1,35 @@
+---
+# 0.1 Discovery Tasks
+- name: "0.1.1 [Discovery] Display Node Connection Info"
+  ansible.builtin.debug:
+    msg: "Discovering node {{ inventory_hostname }} at IP {{ ansible_host }}"
+
+- name: "0.1.2 [Discovery] Check IP / Hostname ICMP reachability"
+  ansible.builtin.command:
+    cmd: "ping -c 2 -W 2 {{ ansible_host }}"
+  delegate_to: localhost
+  changed_when: false
+  register: icmp_check
+  when: discovery_check_icmp | default(true)
+  failed_when: false
+
+- name: "0.1.3 [Discovery] Verify ICMP Ping Success"
+  ansible.builtin.assert:
+    that:
+      - icmp_check.rc == 0
+    fail_msg: "CRITICAL: Node {{ inventory_hostname }} ({{ ansible_host }}) is not reachable via ICMP ping."
+    success_msg: "Node {{ inventory_hostname }} ({{ ansible_host }}) responds to ICMP ping."
+  when: discovery_check_icmp | default(true)
+
+- name: "0.1.4 [Discovery] Verify SSH Port Connectivity"
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ discovery_ssh_port | default(22) }}"
+    timeout: "{{ discovery_timeout | default(5) }}"
+    state: started
+  delegate_to: localhost
+  register: ssh_port_check
+
+- name: "0.1.5 [Discovery] Confirm Node Reachable via Port {{ discovery_ssh_port | default(22) }}"
+  ansible.builtin.debug:
+    msg: "✔ Node {{ inventory_hostname }} ({{ ansible_host }}:{{ discovery_ssh_port | default(22) }}) is listening for SSH."

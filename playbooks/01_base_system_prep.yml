@@ -1,0 +1,27 @@
+---
+# ==============================================================================
+# HoRus-Start Stage 1 Playbook: Base System Preparation
+# ==============================================================================
+# Goals:
+# 1.1 Repository Configuration: Disable enterprise repos, enable pve-no-subscription
+# 1.2 System Update: Update APT cache & execute full distribution upgrade (dist-upgrade)
+# 1.3 Base Packages: Install required administration, networking, and storage utilities
+# 1.4 Verification: Verify APT repository state, PVE kernel version, and save stage1.json
+# ==============================================================================
+
+- name: "Stage 1 | Base System Preparation for Proxmox VE Nodes"
+  hosts: proxmox_nodes:proxmox:all
+  gather_facts: true
+  become: true
+  vars_files:
+    - "../roles/bootstrap_connectivity/defaults/main.yml"
+  vars:
+    ansible_ssh_private_key_file: "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}"
+
+  pre_tasks:
+    - name: "1.0.1 [Prep] Verify Node Management IP & Connectivity"
+      ansible.builtin.debug:
+        msg: "Beginning Stage 1 Base System Preparation on {{ inventory_hostname }} ({{ ansible_host }})"
+
+  roles:
+    - role: base_system_prep

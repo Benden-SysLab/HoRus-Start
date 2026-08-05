@@ -1,0 +1,18 @@
+---
+# Role: storage_prepare
+# Stage 3: Storage Discovery & Provisioning Framework for Proxmox VE Nodes
+
+- name: Include Stage 3.1 Storage Discovery Tasks
+  ansible.builtin.include_tasks: "01_discovery.yml"
+
+- name: Include Stage 3.2 Storage Classification & Config Tasks
+  ansible.builtin.include_tasks: "02_wizard.yml"
+
+- name: Include Stage 3.3 Safety & Validation Pre-checks Tasks
+  ansible.builtin.include_tasks: "03_validation.yml"
+
+- name: Include Stage 3.4 Storage Provisioning Tasks
+  ansible.builtin.include_tasks: "04_provisioning.yml"
+
+- name: Include Stage 3.5 Storage Verification Tasks
+  ansible.builtin.include_tasks: "05_verification.yml"

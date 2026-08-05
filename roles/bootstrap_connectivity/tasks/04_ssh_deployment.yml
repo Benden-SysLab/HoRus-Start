@@ -1,0 +1,60 @@
+---
+# 0.4 SSH Deployment Tasks
+- name: "0.4.1 [SSH Deployment] Deploy public key via password authentication if key missing"
+  ansible.builtin.shell: |
+    if command -v sshpass >/dev/null 2>&1; then
+      sshpass -p '{{ ansible_password }}' ssh -p {{ discovery_ssh_port | default(22) }} -o StrictHostKeyChecking=no -o PubkeyAuthentication=no {{ ansible_user | default('root') }}@{{ ansible_host }} 'mkdir -p {{ ssh_deploy_ssh_dir }} && chmod 700 {{ ssh_deploy_ssh_dir }} && echo "{{ hostvars["localhost"]["horus_infra_public_key"] | default(horus_infra_public_key) }}" >> {{ ssh_deploy_ssh_dir }}/authorized_keys && sort -u {{ ssh_deploy_ssh_dir }}/authorized_keys -o {{ ssh_deploy_ssh_dir }}/authorized_keys && chmod 600 {{ ssh_deploy_ssh_dir }}/authorized_keys'
+    else
+      python3 -c '
+    import os, sys, pty, time
+    host = "{{ ansible_host }}"
+    user = "{{ ansible_user | default("root") }}"
+    port = int("{{ discovery_ssh_port | default(22) }}")
+    password = """{{ ansible_password }}"""
+    key = """{{ hostvars["localhost"]["horus_infra_public_key"] | default(horus_infra_public_key) }}"""
+
+    remote_cmd = f"mkdir -p {{ ssh_deploy_ssh_dir }} && chmod 700 {{ ssh_deploy_ssh_dir }} && echo \"{key}\" >> {{ ssh_deploy_ssh_dir }}/authorized_keys && sort -u {{ ssh_deploy_ssh_dir }}/authorized_keys -o {{ ssh_deploy_ssh_dir }}/authorized_keys && chmod 600 {{ ssh_deploy_ssh_dir }}/authorized_keys"
+
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execvp("ssh", ["ssh", "-p", str(port), "-o", "StrictHostKeyChecking=no", "-o", "PubkeyAuthentication=no", f"{user}@{host}", remote_cmd])
+    else:
+        output = b""
+        while True:
+            try:
+                data = os.read(fd, 1024)
+                if not data: break
+                output += data
+                if b"assword:" in data or b"Password:" in data:
+                    os.write(fd, (password + "\n").encode())
+                    time.sleep(0.5)
+            except OSError:
+                break
+        _, status = os.waitpid(pid, 0)
+        sys.exit(os.WEXITSTATUS(status))
+    '
+    fi
+  delegate_to: localhost
+  when: not key_auth_working
+  no_log: true
+  register: deploy_key_result
+
+- name: "0.4.2 [SSH Deployment] Re-verify SSH key authentication after deployment"
+  ansible.builtin.command:
+    cmd: "ssh -i {{ ssh_identity_dir }}/{{ ssh_identity_filename }} -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p {{ discovery_ssh_port | default(22) }} {{ ansible_user | default('root') }}@{{ ansible_host }} 'echo KEY_DEPLOYED_SUCCESS'"
+  delegate_to: localhost
+  changed_when: false
+  register: post_deploy_key_check
+
+- name: "0.4.3 [SSH Deployment] Assert SSH key authentication active"
+  ansible.builtin.assert:
+    that:
+      - post_deploy_key_check.rc == 0
+      - "'KEY_DEPLOYED_SUCCESS' in post_deploy_key_check.stdout"
+    fail_msg: "CRITICAL: Public SSH key was deployed to {{ inventory_hostname }} ({{ ansible_host }}), but passwordless authentication still failed."
+    success_msg: "✔ Passwordless SSH key authentication is verified and operational for {{ inventory_hostname }}."
+
+- name: "0.4.4 [SSH Deployment] Confirm SSH Key Deployment Complete"
+  ansible.builtin.debug:
+    msg: "✔ Deployed ed25519 SSH public key to {{ inventory_hostname }} ({{ ansible_host }})."
+

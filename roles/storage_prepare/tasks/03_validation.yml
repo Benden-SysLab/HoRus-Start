@@ -1,0 +1,280 @@
+---
+# 3.3 Storage Safety Validation & Desired State Reconciliation Engine Tasks
+# COMPUTES ACTION DECISIONS, SAFETY CONSTRAINTS & GENERATES MACHINE-READABLE ACTION PLAN
+
+- name: "3.3.1 [Validation] Log storage target discovery count for node"
+  ansible.builtin.debug:
+    msg: "Node {{ inventory_hostname }} has {{ node_storage_targets | default([]) | length }} target storage drive(s) to evaluate."
+  tags: ['stage3', 'validation', 'verify', 'reconcile']
+
+- name: "3.3.2 [Validation] Safety check: Assert target storage devices are NOT System OS Disks"
+  ansible.builtin.assert:
+    that:
+      - "item.device != '/dev/' ~ os_disk_name"
+      - "item.mount_point != '/'"
+      - "item.mount_point != '/boot'"
+      - "item.mount_point != '/etc/pve'"
+      - "item.mount_point != '/var'"
+      - "item.mount_point != '/usr'"
+    fail_msg: "CRITICAL SAFETY VIOLATION: Target storage device {{ item.device }} or mount {{ item.mount_point }} conflicts with System OS Disk on {{ inventory_hostname }}!"
+    success_msg: "✔ Device {{ item.device }} confirmed non-system disk on {{ inventory_hostname }}."
+  loop: "{{ node_storage_targets | default([]) }}"
+  when: node_storage_targets is defined and node_storage_targets | length > 0
+  tags: ['stage3', 'validation', 'verify', 'reconcile']
+
+- name: "3.3.3 [Validation] Check physical device or by-id existence on node"
+  ansible.builtin.stat:
+    path: "{{ item.device }}"
+  register: target_dev_stats
+  loop: "{{ node_storage_targets | default([]) }}"
+  when: node_storage_targets is defined and node_storage_targets | length > 0
+  tags: ['stage3', 'validation', 'verify', 'reconcile']
+
+- name: "3.3.4 [Reconciliation] Inspect runtime filesystem signatures via blkid"
+  ansible.builtin.command: "blkid -s TYPE -s UUID -o export {{ item.device }}"
+  register: target_dev_blkid
+  changed_when: false
+  failed_when: false
+  loop: "{{ node_storage_targets | default([]) }}"
+  when: node_storage_targets is defined and node_storage_targets | length > 0
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.5 [Reconciliation] Inspect runtime active device mount status via findmnt"
+  ansible.builtin.command: "findmnt -n -o TARGET {{ item.device }}"
+  register: target_dev_findmnt
+  changed_when: false
+  failed_when: false
+  loop: "{{ node_storage_targets | default([]) }}"
+  when: node_storage_targets is defined and node_storage_targets | length > 0
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.6 [Reconciliation] Check open file descriptors on device if mounted via fuser"
+  ansible.builtin.command: "fuser -m {{ item.device }}"
+  register: target_dev_fuser
+  changed_when: false
+  failed_when: false
+  loop: "{{ node_storage_targets | default([]) }}"
+  when: node_storage_targets is defined and node_storage_targets | length > 0
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.7 [Reconciliation] Inspect runtime Proxmox VE storage status via pvesm status"
+  ansible.builtin.command: pvesm status
+  register: target_dev_pvesm
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.8 [Reconciliation] Compute granular action decision flags (Reconciliation Engine)"
+  ansible.builtin.set_fact:
+    node_reconciled_targets: "{{ reconciled_list_builder | from_json }}"
+  vars:
+    reconciled_list_builder: >-
+      {%- set rec_list = [] -%}
+      {%- set blkid_res = target_dev_blkid.results | default([]) -%}
+      {%- set findmnt_res = target_dev_findmnt.results | default([]) -%}
+      {%- set fuser_res = target_dev_fuser.results | default([]) -%}
+      {%- set pve_stdout = target_dev_pvesm.stdout | default('') -%}
+      {%- set pve_storage_ids_list = (node_pve_storage_ids if (node_pve_storage_ids is defined and node_pve_storage_ids | length > 0) else (pve_stdout.splitlines() | map('trim') | map('regex_replace', '^([a-zA-Z0-9_\\-]+)\\s+.*', '\\1') | list)) -%}
+      {%- set active_swap_str = (active_swaps | default([])) | join(' ') -%}
+      {%- set lvm_pv_str = (lvm_pvs | default([])) | join(' ') -%}
+      {%- set zpool_str = (zpool_status_raw.stdout | default('')) -%}
+      {%- set ceph_str = (ceph_volumes_raw.stdout | default('')) -%}
+      {%- for item in node_storage_targets | default([]) -%}
+        {%- set idx = loop.index0 -%}
+        {%- set blk_out = (blkid_res[idx].stdout | default('')) if (idx < blkid_res | length) else '' -%}
+        {%- set blk_type = '' -%}
+        {%- set blk_uuid = '' -%}
+        {%- for l in blk_out.splitlines() -%}
+          {%- if l.startswith('TYPE=') -%}{%- set blk_type = l.split('=',1)[1] -%}{%- endif -%}
+          {%- if l.startswith('UUID=') -%}{%- set blk_uuid = l.split('=',1)[1] -%}{%- endif -%}
+        {%- endfor -%}
+        {%- set mnt_path = (findmnt_res[idx].stdout | default('') | trim) if (idx < findmnt_res | length) else '' -%}
+        {%- set fuser_out = (fuser_res[idx].stdout | default('') | trim) if (idx < fuser_res | length) else '' -%}
+        
+        {%- set is_os = (item.device == ('/dev/' ~ os_disk_name)) -%}
+        {%- set is_swap = (item.device in active_swap_str) -%}
+        {%- set is_lvm = (item.device in lvm_pv_str) -%}
+        {%- set is_zpool = (item.device in zpool_str) -%}
+        {%- set is_ceph = (item.device in ceph_str) -%}
+        {%- set has_open_handles = (fuser_out != '') -%}
+        
+        {%- set desired_state = item.state | default('present') | lower | trim -%}
+        {%- set desired_fs = item.fstype | default('ext4') -%}
+        {%- set desired_mount = item.mount_point -%}
+        {%- set desired_driver = item.driver | default(item.type | default('dir')) | lower | trim -%}
+        {%- set desired_shared = item.shared | default(false) | bool -%}
+        {%- set operator_allowed_fmt = item.force_format | default(false) | bool -%}
+        
+        {%- set fs_exists = (blk_type != '') -%}
+        {%- set fs_matches = (blk_type == desired_fs) -%}
+        {%- set is_mnt = (mnt_path != '') -%}
+        {%- set mnt_matches = (mnt_path == desired_mount) -%}
+        {%- set mnt_unexpected = is_mnt and (not mnt_matches) -%}
+        {%- set is_pve_reg = (item.name in pve_storage_ids_list) -%}
+        
+        {%- set pve_st_list = (node_pve_storages | default([])) -%}
+        {%- set st_obj_list = pve_st_list | selectattr('storage_id', 'defined') | selectattr('storage_id', 'equalto', item.name) | list -%}
+        {%- set st_obj = st_obj_list | first if (st_obj_list | length > 0) else none -%}
+        {%- set st_nodes = (st_obj.nodes | default('')) if st_obj is not none else '' -%}
+        {%- set st_shared = (st_obj.shared | default(false)) if st_obj is not none else false -%}
+        {%- set scoping_matches = (st_obj is not none) and ((desired_shared and st_shared) or ((not desired_shared) and (not st_shared) and (inventory_hostname in st_nodes.split(',') or st_nodes == '' or st_nodes == inventory_hostname))) -%}
+        
+        {%- set safe_fmt = (not is_os) and (not is_swap) and (not is_lvm) and (not is_zpool) and (not is_ceph) and (desired_mount not in ['/', '/boot', '/etc/pve', '/var', '/usr']) -%}
+        {%- set safe_rm = (not is_os) and (not is_swap) and (not is_lvm) and (not is_zpool) and (not is_ceph) -%}
+        
+        {%- set needs_rm = (desired_state == 'absent') and (is_pve_reg or is_mnt or fs_exists) -%}
+        {%- set needs_pve_rm = is_pve_reg and ((desired_state == 'absent') or operator_allowed_fmt) -%}
+        {%- set needs_umnt = is_mnt and ((desired_state == 'absent') or mnt_unexpected or (operator_allowed_fmt and safe_fmt)) -%}
+        {%- set needs_wipe_rm = (desired_state == 'absent') and operator_allowed_fmt and safe_fmt -%}
+        
+        {%- set needs_fmt_cond = (desired_state == 'present') and ((not fs_exists) or operator_allowed_fmt or (not fs_matches)) -%}
+        {%- set needs_fmt = needs_fmt_cond and safe_fmt and operator_allowed_fmt -%}
+        
+        {%- set needs_mk_dir = (desired_state == 'present') -%}
+        {%- set needs_sysd_mnt = (desired_state == 'present') -%}
+        {%- set needs_fstb = (desired_state == 'present') -%}
+        {%- set needs_mnt_act = (desired_state == 'present') and ((not is_mnt) or (not mnt_matches) or needs_fmt or needs_umnt) -%}
+        {%- set needs_pve_add = (desired_state == 'present') and ((not is_pve_reg) or needs_pve_rm) -%}
+        {%- set needs_pve_conv = (desired_state == 'present') and is_pve_reg and (not needs_pve_rm) and (not scoping_matches) -%}
+        {%- set needs_reload = (desired_state == 'present') -%}
+        
+        {%- set active_uuid = blk_uuid if blk_uuid != '' else (item.uuid | default('none')) -%}
+        
+        {%- set rec_item = item | combine({
+          'driver': desired_driver,
+          'type': desired_driver,
+          'state': desired_state,
+          'uuid': active_uuid,
+          'current_fstype': blk_type if blk_type != '' else 'none',
+          'current_uuid': blk_uuid if blk_uuid != '' else 'none',
+          'current_mount_point': mnt_path if mnt_path != '' else 'none',
+          'filesystem_exists': fs_exists,
+          'filesystem_matches': fs_matches,
+          'mounted': is_mnt,
+          'mount_matches': mnt_matches,
+          'mount_unexpected': mnt_unexpected,
+          'has_open_file_handles': has_open_handles,
+          'registered_in_proxmox': is_pve_reg,
+          'safe_to_format': safe_fmt,
+          'safe_to_remove': safe_rm,
+          'operator_allowed_format': operator_allowed_fmt,
+          'needs_removal': needs_rm,
+          'needs_pvesm_remove': needs_pve_rm,
+          'needs_umount': needs_umnt,
+          'needs_wipe_on_remove': needs_wipe_rm,
+          'needs_format': needs_fmt,
+          'needs_mkdir': needs_mk_dir,
+          'needs_systemd_mount': needs_sysd_mnt,
+          'needs_fstab': needs_fstb,
+          'needs_mount': needs_mnt_act,
+          'needs_pvesm_add': needs_pve_add,
+          'needs_conversion': needs_pve_conv,
+          'needs_reload_daemon': needs_reload
+        }) -%}
+        {%- set _ = rec_list.append(rec_item) -%}
+      {%- endfor -%}
+      {{ rec_list | to_json }}
+  when: node_storage_targets is defined and node_storage_targets | length > 0
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.9 [Reconciliation] Ensure runtime directories exist on localhost"
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "runtime/plans"
+    - "runtime/reports"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.10 [Reconciliation] Generate Machine-Readable Action Plan (runtime/plans/storage_plan.json)"
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../{{ item }}"
+    mode: '0644'
+    content: |
+      {
+        "api_version": "v1",
+        "schema_version": "1.0",
+        "producer": "storage_prepare",
+        "resource_type": "plan",
+        "stage": 3,
+        "step": "reconciliation_plan",
+        "generated_at": "{{ ansible_date_time.iso8601 if ansible_date_time is defined else '' }}",
+        "dry_run": {{ (storage_plan_only | default(false) | bool) | to_json }},
+        "nodes": {
+      {% for h in ansible_play_hosts %}
+          "{{ h }}": {
+            "node_name": "{{ h }}",
+            "management_ip": "{{ hostvars[h]['ansible_host'] }}",
+            "reconciled_targets_count": {{ (hostvars[h]['node_reconciled_targets'] | default([])) | length }},
+            "targets": {{ (hostvars[h]['node_reconciled_targets'] | default([])) | to_json }}
+          }{% if not loop.last %},{% endif %}
+      {% endfor %}
+        }
+      }
+  loop:
+    - "runtime/plans/storage_plan.json"
+    - "runtime/reports/storage_plan.json"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.11 [Reconciliation] Display Formatted Storage Reconciliation Action Plan Report"
+  ansible.builtin.debug:
+    msg:
+      - "=========================================================================="
+      - "STORAGE RECONCILIATION ACTION PLAN — {{ inventory_hostname }}"
+      - "--------------------------------------------------------------------------"
+      - "Storage Name: {{ item.name }}"
+      - "Target Device: {{ item.device }} (UUID: {{ item.uuid | default('N/A') }})"
+      - "Current State: Mounted ({{ item.mounted }}), Registered ({{ item.registered_in_proxmox }}), FS ({{ item.current_fstype }})"
+      - "Desired State: {{ item.state | upper }} (Driver: {{ item.driver }}, Shared: {{ item.shared }}, Mount: {{ item.mount_point }})"
+      - "Reconciliation Decisions & Planned Execution Actions:"
+      - "  - Remove Proxmox Storage (needs_pvesm_remove): {{ item.needs_pvesm_remove }}"
+      - "  - Unmount Filesystem (needs_umount): {{ item.needs_umount }} (Open Handles: {{ item.has_open_file_handles }})"
+      - "  - Wipe Disk on Remove (needs_wipe_on_remove): {{ item.needs_wipe_on_remove }}"
+      - "  - Format Filesystem (needs_format): {{ item.needs_format }} (Safe: {{ item.safe_to_format }}, Allowed: {{ item.operator_allowed_format }})"
+      - "  - Ensure Mount Directory (needs_mkdir): {{ item.needs_mkdir }}"
+      - "  - Create Systemd Mount Unit (needs_systemd_mount): {{ item.needs_systemd_mount }}"
+      - "  - Update /etc/fstab (needs_fstab): {{ item.needs_fstab }}"
+      - "  - Mount Storage Volume (needs_mount): {{ item.needs_mount }}"
+      - "  - Register Proxmox Storage (needs_pvesm_add): {{ item.needs_pvesm_add }}"
+      - "  - Update Proxmox Storage Scoping (needs_conversion): {{ item.needs_conversion }}"
+      - "=========================================================================="
+  loop: "{{ node_reconciled_targets | default([]) }}"
+  when: node_reconciled_targets is defined and node_reconciled_targets | length > 0
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.12 [Action Plan Prompt] Interactive Confirmation before Provisioning Execution"
+  ansible.builtin.pause:
+    prompt: "STORAGE RECONCILIATION PLAN GENERATED FOR {{ inventory_hostname }}. Proceed with provisioning execution? [Y/n]:"
+  register: prompt_plan_confirm
+  when:
+    - not (non_interactive | default(false) | bool)
+    - not (storage_plan_only | default(false) | bool)
+    - node_reconciled_targets is defined and node_reconciled_targets | length > 0
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.13 [Dry-Run Check] Evaluate Dry-Run / Plan-Only execution flag"
+  ansible.builtin.set_fact:
+    cancel_provisioning: >-
+      {{
+        (storage_plan_only | default(false) | bool) or
+        (prompt_plan_confirm.user_input is defined and ((prompt_plan_confirm.user_input | default('y') | lower | trim) in ['n', 'no', '0', 'cancel']))
+      }}
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.14 [Validation] Log Safety & State Reconciliation Execution Decision"
+  ansible.builtin.debug:
+    msg: >-
+      {%- if cancel_provisioning | bool -%}
+        [DRY-RUN / CANCELLED] Reconciliation plan saved to runtime/reports/storage_plan.json. Provisioning execution will be SKIPPED for {{ inventory_hostname }}.
+      {%- else -%}
+        ✔ Stage 3.3 Storage Reconciliation Engine successfully authorized provisioning for {{ inventory_hostname }}.
+      {%- endif -%}
+  tags: ['stage3', 'validation', 'verify', 'reconcile']

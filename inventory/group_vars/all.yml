@@ -1,0 +1,22 @@
+---
+# HoRus-Start Stage 0: Connectivity Variables
+cluster_name: "HoRus-SysLab"
+ansible_user: "root"
+
+# SSH Identity Configuration
+ssh_key_dir: "{{ playbook_dir }}/../credentials/ssh"
+ssh_key_filename: "id_ed25519_horus_infra"
+ssh_private_key_path: "{{ ssh_key_dir }}/{{ ssh_key_filename }}"
+ssh_public_key_path: "{{ ssh_key_dir }}/{{ ssh_key_filename }}.pub"
+ansible_ssh_private_key_file: "{{ ssh_private_key_path }}"
+ssh_key_type: "ed25519"
+ssh_key_comment: "terraform-srv@horus-infrastructure"
+
+# Connectivity & Discovery parameters
+ssh_port: 22
+ping_count: 2
+discovery_timeout_seconds: 5
+
+# Reports output
+reports_dir: "{{ playbook_dir }}/../reports"
+stage0_report_file: "{{ reports_dir }}/stage0_connectivity.json"

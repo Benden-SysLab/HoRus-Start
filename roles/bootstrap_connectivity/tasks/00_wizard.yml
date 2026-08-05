@@ -1,0 +1,199 @@
+---
+# 0.0 Interactive Address, Node Count, and Credentials Discovery Wizard
+- name: "0.0.1 [Wizard] Check if proxmox_credentials.yml and cluster.yml exist"
+  ansible.builtin.stat:
+    path: "{{ credentials_file }}"
+  delegate_to: localhost
+  register: credentials_file_stat
+  run_once: true
+
+- name: "0.0.2 [Wizard] Ensure credentials/ and config/ directories exist"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  loop:
+    - "{{ credentials_file | dirname }}"
+    - "{{ cluster_config_file | dirname }}"
+  run_once: true
+
+- name: "0.0.3 [Wizard] Load existing credentials and cluster configuration if present"
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+  loop:
+    - "{{ credentials_file }}"
+    - "{{ cluster_config_file }}"
+    - "{{ network_config_file }}"
+  when: credentials_file_stat.stat.exists
+  run_once: true
+  ignore_errors: true
+
+- name: "0.0.4 [Wizard] Determine if interactive configuration input is required"
+  ansible.builtin.set_fact:
+    wizard_needed: >-
+      {{
+        (not (credentials_file_stat.stat.exists | default(false))) or
+        (
+          ((node_credentials | default({})).get('horus-pmx-node01', {}).get('password') | default('', true) == '') and
+          ((nodes | default({})).get('horus-pmx-node01', {}).get('password') | default('', true) == '')
+        )
+      }}
+  run_once: true
+
+- name: "0.0.5 [Wizard] Notify existing config and credentials loaded"
+  ansible.builtin.debug:
+    msg: "✔ Existing credentials ({{ credentials_file }}) and config ({{ cluster_config_file }}) loaded with valid passwords. Skipping interactive prompt."
+  when: not wizard_needed
+  run_once: true
+
+# --- Interactive Prompts (Run when wizard_needed is true) ---
+
+- name: "0.0.6 [Wizard] Prompt Cluster Name"
+  ansible.builtin.pause:
+    prompt: "Enter Proxmox VE Cluster Name [Default: HoRus-SysLab]: "
+  register: wizard_cluster_name_input
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.7 [Wizard] Prompt Number of Proxmox Nodes"
+  ansible.builtin.pause:
+    prompt: "Enter Number of Proxmox VE Nodes [Default: 4]: "
+  register: wizard_node_count_input
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.8 [Wizard] Prompt Default SSH Root Username"
+  ansible.builtin.pause:
+    prompt: "Enter Default SSH Username for Proxmox Nodes [Default: root]: "
+  register: wizard_username_input
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.9 [Wizard] Prompt Default SSH Root Password"
+  ansible.builtin.pause:
+    prompt: "Enter SSH Root Password for Proxmox Nodes: "
+    echo: false
+  register: wizard_password_input
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.10 [Wizard] Prompt Node 01 Management IP"
+  ansible.builtin.pause:
+    prompt: "Enter horus-pmx-node01 Management IP [Default: 192.168.1.210]: "
+  register: wizard_node01_ip_input
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.11 [Wizard] Prompt Node 02 Management IP"
+  ansible.builtin.pause:
+    prompt: "Enter horus-pmx-node02 Management IP [Default: 192.168.1.220]: "
+  register: wizard_node02_ip_input
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.12 [Wizard] Prompt Node 03 Management IP"
+  ansible.builtin.pause:
+    prompt: "Enter horus-pmx-node03 Management IP [Default: 192.168.1.230]: "
+  register: wizard_node03_ip_input
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.13 [Wizard] Prompt Node 04 Management IP"
+  ansible.builtin.pause:
+    prompt: "Enter horus-pmx-node04 Management IP [Default: 192.168.1.240]: "
+  register: wizard_node04_ip_input
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.14 [Wizard] Save secrets & passwords to credentials/proxmox_credentials.yml"
+  ansible.builtin.copy:
+    dest: "{{ credentials_file }}"
+    mode: '0600'
+    content: |
+      # Node Root Login Credentials (credentials/ - SECRETS ONLY, NOT IN GIT)
+      node_credentials:
+        horus-pmx-node01:
+          username: "{{ wizard_username_input.user_input | default('root') if wizard_username_input is defined and wizard_username_input.user_input != '' else 'root' }}"
+          password: "{{ wizard_password_input.user_input | default('') if wizard_password_input is defined else '' }}"
+        horus-pmx-node02:
+          username: "{{ wizard_username_input.user_input | default('root') if wizard_username_input is defined and wizard_username_input.user_input != '' else 'root' }}"
+          password: "{{ wizard_password_input.user_input | default('') if wizard_password_input is defined else '' }}"
+        horus-pmx-node03:
+          username: "{{ wizard_username_input.user_input | default('root') if wizard_username_input is defined and wizard_username_input.user_input != '' else 'root' }}"
+          password: "{{ wizard_password_input.user_input | default('') if wizard_password_input is defined else '' }}"
+        horus-pmx-node04:
+          username: "{{ wizard_username_input.user_input | default('root') if wizard_username_input is defined and wizard_username_input.user_input != '' else 'root' }}"
+          password: "{{ wizard_password_input.user_input | default('') if wizard_password_input is defined else '' }}"
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.15 [Wizard] Save long-term topology & roles to config/cluster.yml"
+  ansible.builtin.copy:
+    dest: "{{ cluster_config_file }}"
+    mode: '0644'
+    content: |
+      # Long-term Proxmox Infrastructure Configuration (config/ - SOURCE OF TRUTH)
+      cluster:
+        name: "{{ wizard_cluster_name_input.user_input | default('HoRus-SysLab') if wizard_cluster_name_input is defined and wizard_cluster_name_input.user_input != '' else 'HoRus-SysLab' }}"
+
+      nodes:
+        - name: horus-pmx-node01
+          role:
+            - master
+            - compute
+        - name: horus-pmx-node02
+          role:
+            - worker
+            - compute
+            - gpu
+        - name: horus-pmx-node03
+          role:
+            - worker
+            - storage
+            - database
+        - name: horus-pmx-node04
+          role:
+            - worker
+            - telemetry
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.16 [Wizard] Save network IP management plan to config/network.yml"
+  ansible.builtin.copy:
+    dest: "{{ network_config_file }}"
+    mode: '0644'
+    content: |
+      # Management Network Topology (config/ - NETWORK PLAN)
+      node_network:
+        horus-pmx-node01:
+          management_ip: "{{ wizard_node01_ip_input.user_input | default('192.168.1.210') if wizard_node01_ip_input is defined and wizard_node01_ip_input.user_input != '' else '192.168.1.210' }}"
+        horus-pmx-node02:
+          management_ip: "{{ wizard_node02_ip_input.user_input | default('192.168.1.220') if wizard_node02_ip_input is defined and wizard_node02_ip_input.user_input != '' else '192.168.1.220' }}"
+        horus-pmx-node03:
+          management_ip: "{{ wizard_node03_ip_input.user_input | default('192.168.1.230') if wizard_node03_ip_input is defined and wizard_node03_ip_input.user_input != '' else '192.168.1.230' }}"
+        horus-pmx-node04:
+          management_ip: "{{ wizard_node04_ip_input.user_input | default('192.168.1.240') if wizard_node04_ip_input is defined and wizard_node04_ip_input.user_input != '' else '192.168.1.240' }}"
+  delegate_to: localhost
+  run_once: true
+  when: wizard_needed
+
+- name: "0.0.16 [Wizard] Reload secrets and configuration into runtime variables"
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+  loop:
+    - "{{ credentials_file }}"
+    - "{{ cluster_config_file }}"
+    - "{{ network_config_file }}"
+  run_once: true
+

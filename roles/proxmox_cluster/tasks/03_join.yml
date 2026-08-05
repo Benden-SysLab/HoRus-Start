@@ -1,0 +1,38 @@
+---
+# 2.3 Join Tasks: Add worker nodes to the target Proxmox VE Cluster
+- name: "2.3.1 [Join] Re-check cluster membership status on worker nodes"
+  ansible.builtin.command: pvecm status
+  register: pvecm_status_post_create
+  failed_when: false
+  changed_when: false
+  when: inventory_hostname != (master_node | default('horus-pmx-node01'))
+
+- name: "2.3.2 [Join] Join worker nodes to target Proxmox VE Cluster"
+  ansible.builtin.command: >
+    pvecm add {{ hostvars[master_node | default('horus-pmx-node01')]['ansible_host'] }} --ring0_addr {{ ansible_host }}
+  when:
+    - inventory_hostname != (master_node | default('horus-pmx-node01'))
+    - not (is_in_cluster | default(false))
+    - pvecm_status_post_create.rc != 0
+  register: pvecm_join_out
+
+- name: "2.3.3 [Join] Wait dynamically for cluster quorum synchronization post-join"
+  ansible.builtin.command: pvecm status
+  register: pvecm_status_sync
+  until: >-
+    'Quorate: Yes' in pvecm_status_sync.stdout or
+    'Quorum: OK' in pvecm_status_sync.stdout or
+    'Quorum: Yes' in pvecm_status_sync.stdout or
+    'Quate: Yes' in pvecm_status_sync.stdout
+  retries: 30
+  delay: 2
+  changed_when: false
+  when:
+    - inventory_hostname != (master_node | default('horus-pmx-node01'))
+    - pvecm_join_out is defined and pvecm_join_out is changed
+
+- name: "2.3.4 [Join] Confirm worker node joined cluster successfully"
+  ansible.builtin.debug:
+    msg: "✔ Worker node {{ inventory_hostname }} ({{ ansible_host }}) operational in cluster '{{ cluster_name | default('HoRus-SysLab') }}'."
+  when:
+    - inventory_hostname != (master_node | default('horus-pmx-node01'))

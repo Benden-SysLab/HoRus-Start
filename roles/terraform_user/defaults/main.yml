@@ -1,0 +1,3 @@
+---
+terraform_user_name: "terraform-srv"
+terraform_user_shell: "/bin/bash"

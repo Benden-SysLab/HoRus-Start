@@ -1,0 +1,91 @@
+shared_storages: []
+storage_nodes:
+  horus-pmx-node01:
+    storages: []
+  horus-pmx-node02:
+    storages:
+    - content:
+      - images
+      - rootdir
+      device: /dev/disk/by-id/ata-Seagate_BarraCuda_Q1_SSD_ZA480CV10001_7RV01E1N
+      driver: dir
+      force_format: false
+      fstype: ext4
+      mount_point: /mnt/pve/storage-ai
+      name: storage-ai
+      purpose: Proxmox storage volume on /dev/sdb
+      shared: false
+      state: present
+      type: dir
+  horus-pmx-node03:
+    storages:
+    - content:
+      - images
+      - rootdir
+      device: /dev/disk/by-id/ata-WDC_WD20EFRX-68EUZN0_WD-WCC4M0EYLS9K
+      driver: dir
+      force_format: false
+      fstype: ext4
+      mount_point: /mnt/pve/storage
+      name: storage
+      purpose: Proxmox storage volume on /dev/sda
+      shared: false
+      state: present
+      type: dir
+    - content:
+      - images
+      - rootdir
+      device: /dev/disk/by-id/ata-ST3000DM007-1WY10G_ZFN1Q0C3
+      driver: dir
+      force_format: false
+      fstype: ext4
+      mount_point: /mnt/pve/storage-media
+      name: storage-media
+      purpose: Proxmox storage volume on /dev/sdb
+      shared: false
+      state: present
+      type: dir
+    - content:
+      - images
+      - rootdir
+      device: /dev/disk/by-id/ata-ST1000DM003-1CH162_Z1D1MF6H
+      driver: dir
+      force_format: false
+      fstype: ext4
+      mount_point: /mnt/pve/storage-work
+      name: storage-work
+      purpose: Proxmox storage volume on /dev/sdc
+      shared: false
+      state: present
+      type: dir
+    - content:
+      - images
+      - rootdir
+      - iso
+      - vztmpl
+      - backup
+      device: /dev/disk/by-id/ata-TOSHIBA_MQ01ABD100_X3ONTPEAT
+      driver: dir
+      force_format: false
+      fstype: ext4
+      mount_point: /mnt/pve/storage-infra
+      name: storage-infra
+      purpose: Proxmox storage volume on /dev/sdd
+      shared: false
+      state: present
+      type: dir
+  horus-pmx-node04:
+    storages:
+    - content:
+      - images
+      - rootdir
+      device: /dev/disk/by-id/ata-WDC_WD5000LPVT-22G33T0_WD-WX11A13D9705
+      driver: dir
+      force_format: false
+      fstype: ext4
+      mount_point: /mnt/pve/storage-logs
+      name: storage-logs
+      purpose: Proxmox storage volume on /dev/sdb
+      shared: false
+      state: present
+      type: dir

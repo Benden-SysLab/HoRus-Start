@@ -1,0 +1,11 @@
+template:
+  name: backup
+  description: Backup repository for VM and CT snapshots
+
+storage:
+  type: local
+  filesystem: ext4
+  content:
+    - backup
+  mount_base: /mnt/pve
+  wipe: false

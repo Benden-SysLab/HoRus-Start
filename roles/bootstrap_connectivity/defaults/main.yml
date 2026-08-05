@@ -1,0 +1,35 @@
+---
+# Config Directory Paths (config/ - SOURCE OF TRUTH)
+config_dir: "{{ playbook_dir }}/../config"
+cluster_config_file: "{{ config_dir }}/cluster.yml"
+network_config_file: "{{ config_dir }}/network.yml"
+storage_config_file: "{{ config_dir }}/storage.yml"
+services_config_file: "{{ config_dir }}/services.yml"
+
+# Credentials Directory Paths (credentials/ - SECRETS ONLY)
+credentials_dir: "{{ playbook_dir }}/../credentials"
+credentials_file: "{{ credentials_dir }}/proxmox_credentials.yml"
+
+# SSH Identity & Manifest Metadata
+ssh_identity_dir: "{{ credentials_dir }}/ssh"
+ssh_identity_filename: "id_ed25519_horus_infra"
+ssh_identity_manifest: "{{ ssh_identity_dir }}/manifest.yml"
+ssh_identity_type: "ed25519"
+ssh_identity_comment: "terraform-srv@horus-infrastructure"
+ansible_ssh_private_key_file: "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}"
+
+inventory_file: "{{ playbook_dir }}/../inventory/hosts.yml"
+
+discovery_check_icmp: true
+discovery_ssh_port: 22
+discovery_timeout: 5
+
+ssh_deploy_user: "root"
+ssh_deploy_ssh_dir: "/root/.ssh"
+
+# Runtime Generated Data Paths (runtime/ - GENERATED DATA)
+runtime_dir: "{{ playbook_dir }}/../runtime"
+reports_dir: "{{ runtime_dir }}/reports"
+cache_dir: "{{ runtime_dir }}/cache"
+facts_dir: "{{ runtime_dir }}/facts"
+stage0_report_file: "{{ reports_dir }}/stage0.json"

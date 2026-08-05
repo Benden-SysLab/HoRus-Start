@@ -1,0 +1,85 @@
+---
+# 1.1 Repository Configuration & Standardization Tasks (Trixie Alignment)
+- name: "1.1.1 [Repositories] Remove obsolete or mismatched legacy repository files"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/pve-enterprise.list
+    - /etc/apt/sources.list.d/pve-enterprise.sources
+    - /etc/apt/sources.list.d/pve-no-subscription.list
+    - /etc/apt/sources.list.d/ceph-no-subscription.list
+    - /etc/apt/sources.list.d/ceph.list
+
+- name: "1.1.2 [Repositories] Check for legacy bookworm or bullseye references in /etc/apt/sources.list.d/"
+  ansible.builtin.shell: |
+    grep -lE "bookworm|bullseye|enterprise" /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+  register: legacy_repo_files
+  changed_when: false
+
+- name: "1.1.3 [Repositories] Clean up legacy suite files from /etc/apt/sources.list.d/"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ legacy_repo_files.stdout_lines }}"
+  when: legacy_repo_files.stdout_lines | length > 0
+
+- name: "1.1.4 [Repositories] Configure clean Debian 13 (Trixie) base APT sources"
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      deb http://deb.debian.org/debian trixie main contrib non-free-firmware
+      deb http://deb.debian.org/debian trixie-updates main contrib non-free-firmware
+      deb http://security.debian.org/debian-security trixie-security main contrib non-free-firmware
+
+- name: "1.1.5 [Repositories] Enable Proxmox VE Trixie No-Subscription repository"
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/proxmox.sources
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Types: deb
+      URIs: http://download.proxmox.com/debian/pve
+      Suites: trixie
+      Components: pve-no-subscription
+      Signed-By: /usr/share/keyrings/proxmox-release-trixie.gpg
+
+- name: "1.1.6 [Repositories] Enable Ceph Squid Trixie No-Subscription repository"
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/ceph.sources
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Types: deb
+      URIs: http://download.proxmox.com/debian/ceph-squid
+      Suites: trixie
+      Components: no-subscription
+      Signed-By: /usr/share/keyrings/proxmox-release-trixie.gpg
+
+- name: "1.1.7 [Repositories] Fallback PVE No-Subscription list for legacy PVE tooling"
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/pve-no-subscription.list
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      deb http://download.proxmox.com/debian/pve trixie pve-no-subscription
+
+- name: "1.1.8 [Repositories] Remove Proxmox VE Web GUI subscription warning prompt"
+  ansible.builtin.replace:
+    path: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+    regexp: "Ext\\.Msg\\.show\\(\\{\\s*title: gettext\\('No valid sub"
+    replace: "void({ // Ext.Msg.show({ title: gettext('No valid sub"
+  ignore_errors: true
+  notify: Restart pveproxy service
+
+- name: "1.1.9 [Repositories] Update apt cache with standardized Trixie repositories"
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+

@@ -1,0 +1,15 @@
+---
+# Role: proxmox_cluster
+# Stage 2: Proxmox VE Cluster Initialization & Node Join
+
+- name: Include Stage 2.1 Cluster Discovery Tasks
+  ansible.builtin.include_tasks: "01_discovery.yml"
+
+- name: Include Stage 2.2 Cluster Creation Tasks
+  ansible.builtin.include_tasks: "02_create.yml"
+
+- name: Include Stage 2.3 Cluster Join Tasks
+  ansible.builtin.include_tasks: "03_join.yml"
+
+- name: Include Stage 2.4 Cluster Verification Tasks
+  ansible.builtin.include_tasks: "04_verification.yml"

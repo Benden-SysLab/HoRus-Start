@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=========================================================================="
+echo "          HoRus-Start — Proxmox VE Infrastructure Bootstrap"
+echo "              Stage 0 Gate & Stage 1 Connectivity Launcher"
+echo "=========================================================================="
+echo "Preflight Gate   : scripts/stage0_preflight.py"
+echo "Target Inventory : inventory/hosts.yml"
+echo "Playbook         : playbooks/00_bootstrap_connectivity.yml"
+echo "--------------------------------------------------------------------------"
+
+echo "[1/2] Running Stage 0 Infrastructure Readiness Gate..."
+python3 scripts/stage0_preflight.py
+
+if [ ! -f "inventory/hosts.yml" ]; then
+    echo "ERROR: inventory/hosts.yml not found!"
+    exit 1
+fi
+
+echo "[2/2] Running Stage 1 Bootstrap Connectivity..."
+ansible-playbook -i inventory/hosts.yml playbooks/00_bootstrap_connectivity.yml "$@"
+
+echo "--------------------------------------------------------------------------"
+echo "✔ Stage 0 Gate & Stage 1 Bootstrap Connectivity execution finished."
+echo "=========================================================================="

@@ -1,0 +1,391 @@
+---
+- name: HoRus-Start | Day-0 Bootstrap Controller Setup & Interactive Wizard
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  vars_prompt:
+    - name: wizard_cluster_name
+      prompt: "\n======================================================\n      HoRus-Start Day-0 Interactive Bootstrap Wizard  \n======================================================\nEnter Proxmox VE Cluster Name"
+      private: false
+      default: "HoRus-SysLab"
+
+    - name: wizard_ansible_user
+      prompt: "Enter SSH Administrator Username for Proxmox Nodes"
+      private: false
+      default: "root"
+
+    - name: wizard_node01_name
+      prompt: "Enter Node 1 Hostname (Master)"
+      private: false
+      default: "horus-pmx-node01"
+
+    - name: wizard_node01_ip
+      prompt: "Enter Node 1 IP Address"
+      private: false
+      default: "192.168.1.210"
+
+    - name: pmx_pwd_node01
+      prompt: "Enter password for Node 1 (press Enter if saved in credentials)"
+      private: true
+      default: ""
+
+    - name: wizard_node02_name
+      prompt: "Enter Node 2 Hostname (Worker)"
+      private: false
+      default: "horus-pmx-node02"
+
+    - name: wizard_node02_ip
+      prompt: "Enter Node 2 IP Address"
+      private: false
+      default: "192.168.1.220"
+
+    - name: pmx_pwd_node02
+      prompt: "Enter password for Node 2 (press Enter if saved in credentials)"
+      private: true
+      default: ""
+
+    - name: wizard_node03_name
+      prompt: "Enter Node 3 Hostname (Worker)"
+      private: false
+      default: "horus-pmx-node03"
+
+    - name: wizard_node03_ip
+      prompt: "Enter Node 3 IP Address"
+      private: false
+      default: "192.168.1.230"
+
+    - name: pmx_pwd_node03
+      prompt: "Enter password for Node 3 (press Enter if saved in credentials)"
+      private: true
+      default: ""
+
+    - name: wizard_node04_name
+      prompt: "Enter Node 4 Hostname (Worker)"
+      private: false
+      default: "horus-pmx-node04"
+
+    - name: wizard_node04_ip
+      prompt: "Enter Node 4 IP Address"
+      private: false
+      default: "192.168.1.240"
+
+    - name: pmx_pwd_node04
+      prompt: "Enter password for Node 4 (press Enter if saved in credentials)"
+      private: true
+      default: ""
+
+  pre_tasks:
+    - name: Check if project is already initialized (initialized.lock)
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../credentials/initialized.lock"
+      register: is_initialized_lock
+
+    - name: Check if existing credentials file exists
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/../credentials/proxmox_credentials.yml"
+      register: creds_file_stat
+
+    - name: Load existing credentials if available
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../credentials/proxmox_credentials.yml"
+        name: existing_creds
+      when: creds_file_stat.stat.exists
+      ignore_errors: true
+
+    - name: Resolve effective root passwords
+      ansible.builtin.set_fact:
+        effective_pwd_node01: >-
+          {%- if pmx_pwd_node01 is defined and pmx_pwd_node01 | string | trim != '' -%}
+            {{ pmx_pwd_node01 | string | trim }}
+          {%- elif existing_creds is defined and existing_creds is mapping -%}
+            {%- set px = existing_creds.get('proxmox', {}) if (existing_creds.get('proxmox') is mapping) else {} -%}
+            {%- set nd = existing_creds.get('nodes', {}) if (existing_creds.get('nodes') is mapping) else {} -%}
+            {%- set p1 = px.get(wizard_node01_name, {}).get('password') if (px.get(wizard_node01_name) is mapping) else None -%}
+            {%- set p2 = nd.get(wizard_node01_name, {}).get('password') if (nd.get(wizard_node01_name) is mapping) else None -%}
+            {%- set p = p1 if (p1 is not none and p1 | string | trim != '') else (p2 if (p2 is not none and p2 | string | trim != '') else '') -%}
+            {{ p }}
+          {%- else -%}
+            
+          {%- endif -%}
+        effective_pwd_node02: >-
+          {%- if pmx_pwd_node02 is defined and pmx_pwd_node02 | string | trim != '' -%}
+            {{ pmx_pwd_node02 | string | trim }}
+          {%- elif existing_creds is defined and existing_creds is mapping -%}
+            {%- set px = existing_creds.get('proxmox', {}) if (existing_creds.get('proxmox') is mapping) else {} -%}
+            {%- set nd = existing_creds.get('nodes', {}) if (existing_creds.get('nodes') is mapping) else {} -%}
+            {%- set p1 = px.get(wizard_node02_name, {}).get('password') if (px.get(wizard_node02_name) is mapping) else None -%}
+            {%- set p2 = nd.get(wizard_node02_name, {}).get('password') if (nd.get(wizard_node02_name) is mapping) else None -%}
+            {%- set p = p1 if (p1 is not none and p1 | string | trim != '') else (p2 if (p2 is not none and p2 | string | trim != '') else '') -%}
+            {{ p }}
+          {%- else -%}
+            
+          {%- endif -%}
+        effective_pwd_node03: >-
+          {%- if pmx_pwd_node03 is defined and pmx_pwd_node03 | string | trim != '' -%}
+            {{ pmx_pwd_node03 | string | trim }}
+          {%- elif existing_creds is defined and existing_creds is mapping -%}
+            {%- set px = existing_creds.get('proxmox', {}) if (existing_creds.get('proxmox') is mapping) else {} -%}
+            {%- set nd = existing_creds.get('nodes', {}) if (existing_creds.get('nodes') is mapping) else {} -%}
+            {%- set p1 = px.get(wizard_node03_name, {}).get('password') if (px.get(wizard_node03_name) is mapping) else None -%}
+            {%- set p2 = nd.get(wizard_node03_name, {}).get('password') if (nd.get(wizard_node03_name) is mapping) else None -%}
+            {%- set p = p1 if (p1 is not none and p1 | string | trim != '') else (p2 if (p2 is not none and p2 | string | trim != '') else '') -%}
+            {{ p }}
+          {%- else -%}
+            
+          {%- endif -%}
+        effective_pwd_node04: >-
+          {%- if pmx_pwd_node04 is defined and pmx_pwd_node04 | string | trim != '' -%}
+            {{ pmx_pwd_node04 | string | trim }}
+          {%- elif existing_creds is defined and existing_creds is mapping -%}
+            {%- set px = existing_creds.get('proxmox', {}) if (existing_creds.get('proxmox') is mapping) else {} -%}
+            {%- set nd = existing_creds.get('nodes', {}) if (existing_creds.get('nodes') is mapping) else {} -%}
+            {%- set p1 = px.get(wizard_node04_name, {}).get('password') if (px.get(wizard_node04_name) is mapping) else None -%}
+            {%- set p2 = nd.get(wizard_node04_name, {}).get('password') if (nd.get(wizard_node04_name) is mapping) else None -%}
+            {%- set p = p1 if (p1 is not none and p1 | string | trim != '') else (p2 if (p2 is not none and p2 | string | trim != '') else '') -%}
+            {{ p }}
+          {%- else -%}
+            
+          {%- endif -%}
+      no_log: true
+
+    - name: Persist wizard parameters as facts on localhost
+      ansible.builtin.set_fact:
+        wizard_cluster_name: "{{ wizard_cluster_name | default('HoRus-SysLab') }}"
+        wizard_ansible_user: "{{ wizard_ansible_user | default('root') }}"
+        wizard_node01_name: "{{ wizard_node01_name | default('horus-pmx-node01') }}"
+        wizard_node02_name: "{{ wizard_node02_name | default('horus-pmx-node02') }}"
+        wizard_node03_name: "{{ wizard_node03_name | default('horus-pmx-node03') }}"
+        wizard_node04_name: "{{ wizard_node04_name | default('horus-pmx-node04') }}"
+
+    - name: Ensure credentials and state directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0700'
+      loop:
+        - "{{ playbook_dir }}/../credentials/ssh"
+        - "{{ playbook_dir }}/../.state"
+        - "{{ playbook_dir }}/../inventory"
+        - "{{ playbook_dir }}/../reports"
+
+    - name: Generate dynamic inventory/hosts.yml from Wizard input
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/../inventory/hosts.yml"
+        mode: '0644'
+        content: |
+          # Auto-generated by HoRus-Start Interactive Wizard
+          all:
+            children:
+              proxmox_master:
+                hosts:
+                  {{ wizard_node01_name }}:
+                    ansible_host: {{ wizard_node01_ip }}
+                    ansible_user: {{ wizard_ansible_user }}
+                    pve_role: master
+                    boot_disk: "/dev/disk/by-id/ata-KINGSTON_SA400S37240G_50026B7682D12345"
+
+              proxmox_workers:
+                hosts:
+                  {{ wizard_node02_name }}:
+                    ansible_host: {{ wizard_node02_ip }}
+                    ansible_user: {{ wizard_ansible_user }}
+                    pve_role: compute_ai
+                    boot_disk: "/dev/disk/by-id/ata-Crucial_CT120BX500SSD1_1948E2221234"
+
+                  {{ wizard_node03_name }}:
+                    ansible_host: {{ wizard_node03_ip }}
+                    ansible_user: {{ wizard_ansible_user }}
+                    pve_role: storage_master
+                    boot_disk: "/dev/disk/by-id/ata-SanDisk_SDSSDA120G_181156801234"
+
+                  {{ wizard_node04_name }}:
+                    ansible_host: {{ wizard_node04_ip }}
+                    ansible_user: {{ wizard_ansible_user }}
+                    pve_role: telemetry
+                    boot_disk: "/dev/disk/by-id/ata-KINGSTON_SA400S37120G_50026B7682D99999"
+
+              proxmox:
+                children:
+                  proxmox_master:
+                  proxmox_workers:
+      when: not is_initialized_lock.stat.exists
+
+    - name: Save entered credentials to credentials/proxmox_credentials.yml
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/../credentials/proxmox_credentials.yml"
+        mode: '0600'
+        content: |
+          cluster_name: {{ wizard_cluster_name }}
+          ansible_user: {{ wizard_ansible_user }}
+          proxmox:
+            {{ wizard_node01_name }}:
+              username: {{ wizard_ansible_user }}
+              password: "{{ effective_pwd_node01 }}"
+            {{ wizard_node02_name }}:
+              username: {{ wizard_ansible_user }}
+              password: "{{ effective_pwd_node02 }}"
+            {{ wizard_node03_name }}:
+              username: {{ wizard_ansible_user }}
+              password: "{{ effective_pwd_node03 }}"
+            {{ wizard_node04_name }}:
+              username: {{ wizard_ansible_user }}
+              password: "{{ effective_pwd_node04 }}"
+      no_log: true
+      when: not is_initialized_lock.stat.exists
+
+    - name: Dynamically register Node 1 in Ansible memory
+      ansible.builtin.add_host:
+        name: "{{ wizard_node01_name }}"
+        groups: ["proxmox", "proxmox_nodes", "proxmox_master"]
+        ansible_host: "{{ wizard_node01_ip }}"
+        ansible_user: "{{ wizard_ansible_user }}"
+        ansible_password: "{{ effective_pwd_node01 }}"
+        cluster_name: "{{ wizard_cluster_name }}"
+        master_node: "{{ wizard_node01_name }}"
+
+    - name: Dynamically register Node 2 in Ansible memory
+      ansible.builtin.add_host:
+        name: "{{ wizard_node02_name }}"
+        groups: ["proxmox", "proxmox_nodes", "proxmox_workers"]
+        ansible_host: "{{ wizard_node02_ip }}"
+        ansible_user: "{{ wizard_ansible_user }}"
+        ansible_password: "{{ effective_pwd_node02 }}"
+        cluster_name: "{{ wizard_cluster_name }}"
+        master_node: "{{ wizard_node01_name }}"
+
+    - name: Dynamically register Node 3 in Ansible memory
+      ansible.builtin.add_host:
+        name: "{{ wizard_node03_name }}"
+        groups: ["proxmox", "proxmox_nodes", "proxmox_workers"]
+        ansible_host: "{{ wizard_node03_ip }}"
+        ansible_user: "{{ wizard_ansible_user }}"
+        ansible_password: "{{ effective_pwd_node03 }}"
+        cluster_name: "{{ wizard_cluster_name }}"
+        master_node: "{{ wizard_node01_name }}"
+
+    - name: Dynamically register Node 4 in Ansible memory
+      ansible.builtin.add_host:
+        name: "{{ wizard_node04_name }}"
+        groups: ["proxmox", "proxmox_nodes", "proxmox_workers"]
+        ansible_host: "{{ wizard_node04_ip }}"
+        ansible_user: "{{ wizard_ansible_user }}"
+        ansible_password: "{{ effective_pwd_node04 }}"
+        cluster_name: "{{ wizard_cluster_name }}"
+        master_node: "{{ wizard_node01_name }}"
+
+  roles:
+    - role: ssh_key_generation
+      tags: [ssh]
+
+- name: HoRus-Start | Proxmox VE Day-0 Bootstrap Execution
+  hosts: proxmox:proxmox_nodes
+  gather_facts: true
+  become: true
+
+  pre_tasks:
+    - name: Ensure Python 3 runtime is present on Proxmox node
+      ansible.builtin.raw: test -e /usr/bin/python3 || (apt-get update && apt-get install -y python3)
+      changed_when: false
+
+    - name: Log Bootstrap execution status
+      ansible.builtin.debug:
+        msg: "Executing HoRus-Start Day-0 Bootstrap on {{ inventory_hostname }} ({{ ansible_host }})"
+
+  roles:
+    - role: common
+      tags: [common]
+
+
+    - role: proxmox_cluster
+      tags: [cluster]
+
+    - role: proxmox_repository
+      tags: [repository]
+
+    - role: proxmox_update
+      tags: [update]
+
+    - role: storage_prepare
+      tags: [storage]
+
+    - role: infrastructure_repository
+      tags: [infra_repo]
+
+    - role: terraform_user
+      tags: [terraform]
+
+    - role: proxmox_templates
+      tags: [templates]
+
+    - role: security_baseline
+      tags: [security]
+
+- name: HoRus-Start | Post-Bootstrap Verification, Password Purge & Lock
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+
+  tasks:
+    - name: Purge root passwords from credentials/proxmox_credentials.yml (Audit Log Retained)
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/../credentials/proxmox_credentials.yml"
+        mode: '0600'
+        content: |
+          # Proxmox VE Audit Credentials Log
+          # Temporary passwords purged after Day-0 bootstrap
+          # SSH key authentication active via terraform-srv
+          cluster_name: "{{ wizard_cluster_name | default(hostvars['localhost']['wizard_cluster_name'] | default('HoRus-SysLab')) }}"
+          ansible_user: "{{ wizard_ansible_user | default(hostvars['localhost']['wizard_ansible_user'] | default('root')) }}"
+          nodes:
+            {{ wizard_node01_name | default(hostvars['localhost']['wizard_node01_name'] | default('horus-pmx-node01')) }}:
+              username: {{ wizard_ansible_user | default(hostvars['localhost']['wizard_ansible_user'] | default('root')) }}
+              password: null
+              status: "purged"
+            {{ wizard_node02_name | default(hostvars['localhost']['wizard_node02_name'] | default('horus-pmx-node02')) }}:
+              username: {{ wizard_ansible_user | default(hostvars['localhost']['wizard_ansible_user'] | default('root')) }}
+              password: null
+              status: "purged"
+            {{ wizard_node03_name | default(hostvars['localhost']['wizard_node03_name'] | default('horus-pmx-node03')) }}:
+              username: {{ wizard_ansible_user | default(hostvars['localhost']['wizard_ansible_user'] | default('root')) }}
+              password: null
+              status: "purged"
+            {{ wizard_node04_name | default(hostvars['localhost']['wizard_node04_name'] | default('horus-pmx-node04')) }}:
+              username: {{ wizard_ansible_user | default(hostvars['localhost']['wizard_ansible_user'] | default('root')) }}
+              password: null
+              status: "purged"
+
+    - name: Create credentials/initialized.lock state file
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/../credentials/initialized.lock"
+        mode: '0644'
+        content: |
+          bootstrap:
+            initialized: true
+            version: "2.0.0"
+            created: "{{ ansible_date_time.iso8601 }}"
+            project: HoRus-Start
+            cluster_name: "{{ wizard_cluster_name | default(hostvars['localhost']['wizard_cluster_name'] | default('HoRus-SysLab')) }}"
+          ssh:
+            generated: true
+            algorithm: ed25519
+            key_location: credentials/ssh/id_ed25519_horus_infra
+          nodes:
+            {{ wizard_node01_name | default(hostvars['localhost']['wizard_node01_name'] | default('horus-pmx-node01')) }}: completed
+            {{ wizard_node02_name | default(hostvars['localhost']['wizard_node02_name'] | default('horus-pmx-node02')) }}: completed
+            {{ wizard_node03_name | default(hostvars['localhost']['wizard_node03_name'] | default('horus-pmx-node03')) }}: completed
+            {{ wizard_node04_name | default(hostvars['localhost']['wizard_node04_name'] | default('horus-pmx-node04')) }}: completed
+
+    - name: Display completion summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================================================="
+          - "HoRus-Start Day-0 Bootstrap COMPLETED SUCCESSFULLY!"
+          - "--------------------------------------------------------------------------"
+          - "1. Proxmox VE Cluster '{{ wizard_cluster_name }}' quorate and active."
+          - "2. terraform-srv SSH access verified on all Proxmox nodes."
+          - "3. Local root passwords automatically purged from credentials/proxmox_credentials.yml."
+          - "4. credentials/initialized.lock state file created."
+          - "5. Ready for Day-1 Virtual Infrastructure provisioner (HoRus-Bootstrap Terraform)."
+          - "=========================================================================="

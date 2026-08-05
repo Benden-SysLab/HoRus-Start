@@ -1,0 +1,27 @@
+---
+# 0.2 Authentication Tasks
+- name: "0.2.1 [Authentication] Verify login user specification"
+  ansible.builtin.assert:
+    that:
+      - ansible_user is defined or auth_username is defined
+    fail_msg: "CRITICAL: No SSH login user defined for node {{ inventory_hostname }}."
+
+- name: "0.2.2 [Authentication] Probe passwordless SSH key authentication status"
+  ansible.builtin.command:
+    cmd: "ssh -i {{ ssh_identity_dir }}/{{ ssh_identity_filename }} -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p {{ discovery_ssh_port | default(22) }} {{ ansible_user | default('root') }}@{{ ansible_host }} 'echo KEY_AUTH_SUCCESS'"
+  delegate_to: localhost
+  changed_when: false
+  failed_when: false
+  register: ssh_key_probe
+
+- name: "0.2.3 [Authentication] Determine if SSH key authentication is working"
+  ansible.builtin.set_fact:
+    key_auth_working: "{{ ssh_key_probe.rc == 0 and 'KEY_AUTH_SUCCESS' in ssh_key_probe.stdout }}"
+
+- name: "0.2.4 [Authentication] Display SSH authentication probe result"
+  ansible.builtin.debug:
+    msg:
+      - "✔ Node: {{ inventory_hostname }} ({{ ansible_host }})"
+      - "✔ Passwordless SSH key active: {{ key_auth_working }}"
+      - "✔ Action: {{ 'Key active - password login skipped' if key_auth_working else 'Key missing - deploying public key via root credentials' }}"
+

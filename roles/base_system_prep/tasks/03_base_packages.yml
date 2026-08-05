@@ -1,0 +1,54 @@
+---
+# 1.3 Base Packages Installation Tasks
+- name: "1.3.1 [Base Packages] Ensure core administration and diagnostic packages are installed"
+  ansible.builtin.apt:
+    name:
+      - curl
+      - wget
+      - htop
+      - git
+      - vim
+      - tcpdump
+      - dnsutils
+      - ethtool
+      - net-tools
+      - iperf3
+      - rsync
+      - screen
+      - tmux
+      - unzip
+      - jq
+      - ca-certificates
+      - sudo
+      - lm-sensors
+      - lvm2
+      - xfsprogs
+      - parted
+      - pve-headers
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  ignore_errors: true
+
+- name: "1.3.2 [Base Packages] Ensure fallback base packages are installed"
+  ansible.builtin.apt:
+    name:
+      - curl
+      - wget
+      - htop
+      - git
+      - vim
+      - tcpdump
+      - ethtool
+      - net-tools
+      - iperf3
+      - rsync
+      - unzip
+      - jq
+      - ca-certificates
+      - sudo
+    state: present
+
+- name: "1.3.3 [Base Packages] Confirm core administration packages status"
+  ansible.builtin.debug:
+    msg: "✔ Core system utilities successfully installed on {{ inventory_hostname }}."

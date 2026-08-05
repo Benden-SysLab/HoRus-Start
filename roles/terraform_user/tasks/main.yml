@@ -1,0 +1,60 @@
+---
+# Role: terraform_user
+# Creates the terraform-srv service account with ed25519 public key and passwordless sudo.
+
+- name: Ensure horus_infra_public_key fact is available
+  ansible.builtin.set_fact:
+    horus_infra_public_key: "{{ horus_infra_public_key | default(hostvars['localhost']['horus_infra_public_key'] | default(lookup('file', playbook_dir + '/../credentials/ssh/id_ed25519_horus_infra.pub'))) }}"
+
+- name: Create terraform-srv system group
+  ansible.builtin.group:
+    name: "{{ terraform_user_name }}"
+    state: present
+
+- name: Create terraform-srv system user
+  ansible.builtin.user:
+    name: "{{ terraform_user_name }}"
+    group: "{{ terraform_user_name }}"
+    shell: "{{ terraform_user_shell }}"
+    comment: "HoRus Infrastructure Terraform Automation Account"
+    state: present
+    create_home: true
+
+- name: Ensure .ssh directory exists for terraform-srv
+  ansible.builtin.file:
+    path: "/home/{{ terraform_user_name }}/.ssh"
+    state: directory
+    owner: "{{ terraform_user_name }}"
+    group: "{{ terraform_user_name }}"
+    mode: '0700'
+
+- name: Deploy ed25519 public key to terraform-srv authorized_keys
+  ansible.posix.authorized_key:
+    user: "{{ terraform_user_name }}"
+    state: present
+    key: "{{ horus_infra_public_key }}"
+    exclusive: false
+
+- name: Ensure sudo package is installed
+  ansible.builtin.apt:
+    name: sudo
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Configure passwordless sudo for terraform-srv
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ terraform_user_name }}"
+    content: "{{ terraform_user_name }} ALL=(ALL) NOPASSWD:ALL\n"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: '/usr/sbin/visudo -cf %s'
+
+- name: Ensure root SSH login remains active during bootstrap
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PermitRootLogin'
+    line: 'PermitRootLogin yes'
+    state: present
+  notify: Restart sshd

@@ -1,0 +1,12 @@
+template:
+  name: local-ai
+  description: AI models and datasets storage
+
+storage:
+  type: local
+  filesystem: ext4
+  content:
+    - images
+    - rootdir
+  mount_base: /mnt/pve
+  wipe: false

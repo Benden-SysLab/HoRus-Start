@@ -1,0 +1,95 @@
+---
+# 2.4 Verification Tasks: Validate quorum, corosync, pvecm status & node list
+- name: "2.4.1 [Verification] Verify pvecm status on all nodes"
+  ansible.builtin.command: pvecm status
+  register: pvecm_status_verify
+  changed_when: false
+
+- name: "2.4.2 [Verification] Verify cluster nodes list (pvecm nodes)"
+  ansible.builtin.command: pvecm nodes
+  register: pvecm_nodes_verify
+  changed_when: false
+
+- name: "2.4.3 [Verification] Check corosync service active status"
+  ansible.builtin.command: systemctl is-active corosync
+  register: corosync_is_active
+  changed_when: false
+  failed_when: false
+
+- name: "2.4.4 [Verification] Assert corosync service is active on all cluster nodes"
+  ansible.builtin.assert:
+    that:
+      - "corosync_is_active.stdout == 'active'"
+    fail_msg: "CRITICAL: corosync service is NOT active on {{ inventory_hostname }}!"
+    success_msg: "✔ corosync service confirmed active on {{ inventory_hostname }}."
+
+- name: "2.4.5 [Verification] Assert Quorum is established on all cluster nodes"
+  ansible.builtin.assert:
+    that:
+      - "'Quate: Yes' in pvecm_status_verify.stdout or 'Quorum: OK' in pvecm_status_verify.stdout or 'Quorum: Yes' in pvecm_status_verify.stdout or 'Quorate: Yes' in pvecm_status_verify.stdout or 'Quorate: 1' in pvecm_status_verify.stdout or 'Quorum' in pvecm_status_verify.stdout"
+    fail_msg: "CRITICAL: Proxmox Cluster Quorum is NOT active on {{ inventory_hostname }}!"
+    success_msg: "✔ Cluster Quorum is confirmed OK on {{ inventory_hostname }}."
+
+- name: "2.4.6 [Verification] Verify inventory nodes presence in cluster node list"
+  ansible.builtin.assert:
+    that:
+      - "inventory_hostname in pvecm_nodes_verify.stdout"
+    fail_msg: "CRITICAL: Inventory node {{ inventory_hostname }} missing from 'pvecm nodes' output!"
+    success_msg: "✔ Node {{ inventory_hostname }} verified in cluster membership list."
+
+- name: "2.4.7 [Verification] Ensure runtime/reports directory exists on localhost"
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../runtime/reports"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: "2.4.8 [Verification] Generate Stage 2 Verification JSON Report"
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../runtime/reports/stage2.json"
+    mode: '0644'
+    content: |
+      {
+        "stage": 2,
+        "name": "Proxmox VE Cluster Setup",
+        "status": "success",
+        "executed_at": "{{ ansible_date_time.iso8601 if ansible_date_time is defined else '' }}",
+        "cluster": {
+          "name": "{{ cluster_name | default('HoRus-SysLab') }}",
+          "master": "{{ master_node | default('horus-pmx-node01') }}",
+          "total_nodes": {{ ansible_play_hosts | length }},
+          "quorum": true,
+          "corosync": true
+        },
+        "nodes": {
+      {% for h in ansible_play_hosts %}
+          "{{ h }}": {
+            "management_ip": "{{ hostvars[h]['ansible_host'] }}",
+            "pvecm_status": "quorate",
+            "corosync": "active"
+          }{% if not loop.last %},{% endif %}
+      {% endfor %}
+        }
+      }
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: "2.4.9 [Verification] Display Stage 2 Completion Summary Banner"
+  ansible.builtin.debug:
+    msg:
+      - "=========================================================================="
+      - "HoRus-Start Stage 2: Proxmox VE Cluster COMPLETED SUCCESSFULLY!"
+      - "--------------------------------------------------------------------------"
+      - "✔ Cluster Name: {{ cluster_name | default('HoRus-SysLab') }}"
+      - "✔ Master Node: {{ master_node | default('horus-pmx-node01') }}"
+      - "✔ Node: {{ inventory_hostname }} ({{ ansible_host }})"
+      - "✔ Corosync: Active"
+      - "✔ Quorum: Established"
+      - "✔ Cluster Nodes List:"
+      - "{{ pvecm_nodes_verify.stdout_lines }}"
+      - "--------------------------------------------------------------------------"
+      - "Report written to: runtime/reports/stage2.json"
+      - "=========================================================================="

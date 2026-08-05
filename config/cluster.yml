@@ -1,0 +1,26 @@
+# Long-term Proxmox Infrastructure Configuration (config/ - SOURCE OF TRUTH)
+cluster:
+  name: "HoRus-SysLab"
+
+nodes:
+  - name: horus-pmx-node01
+    role:
+      - master
+      - compute
+
+  - name: horus-pmx-node02
+    role:
+      - worker
+      - compute
+      - gpu
+
+  - name: horus-pmx-node03
+    role:
+      - worker
+      - storage
+      - database
+
+  - name: horus-pmx-node04
+    role:
+      - worker
+      - telemetry

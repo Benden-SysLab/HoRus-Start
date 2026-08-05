@@ -1,0 +1,29 @@
+---
+# ==============================================================================
+# HoRus-Start Stage 2 Playbook: Proxmox VE Cluster Setup
+# ==============================================================================
+# Goals:
+# 2.1 Discovery: Check if cluster already exists on nodes
+# 2.2 Create: Initialize cluster on Master node if absent
+# 2.3 Join: Add remaining worker nodes to the cluster
+# 2.4 Verification: Validate quorum, corosync, pvecm status, node list & save stage2.json
+# ==============================================================================
+
+- name: "Stage 2 | Proxmox VE Cluster Initialization & Node Joining"
+  hosts: proxmox_nodes:proxmox:all
+  gather_facts: true
+  become: true
+  vars_files:
+    - "../roles/bootstrap_connectivity/defaults/main.yml"
+  vars:
+    ansible_ssh_private_key_file: "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}"
+    cluster_name: "HoRus-SysLab"
+    master_node: "horus-pmx-node01"
+
+  pre_tasks:
+    - name: "2.0.1 [Prep] Verify Node Management IP & Connectivity for Cluster Setup"
+      ansible.builtin.debug:
+        msg: "Beginning Stage 2 Proxmox VE Cluster Setup on {{ inventory_hostname }} ({{ ansible_host }})"
+
+  roles:
+    - role: proxmox_cluster

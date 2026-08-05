@@ -1,0 +1,76 @@
+# ==============================================================================
+# HoRus-Start Git Ignore Configuration
+# Secrets, Credentials, Transient Runtime Files & System Artifacts
+# ==============================================================================
+
+# 1. Strictly ignore sensitive credentials, tokens, passwords, and private SSH keys
+credentials/*
+!credentials/.gitkeep
+credentials/ssh/*
+!credentials/ssh/.gitkeep
+*.pem
+*.key
+*.pub
+*.vault
+.vault_pass
+.env
+.env.*
+tokens/
+
+# 2. Ignore temporary runtime execution logs, cache, locks, state, and runtime data
+runtime/*
+!runtime/**/.gitkeep
+runtime/cache/*
+!runtime/cache/.gitkeep
+runtime/locks/*
+!runtime/locks/.gitkeep
+runtime/state/*
+!runtime/state/.gitkeep
+runtime/discovery/*
+!runtime/discovery/.gitkeep
+runtime/facts/*
+!runtime/facts/.gitkeep
+runtime/plans/*
+!runtime/plans/.gitkeep
+runtime/reports/*
+!runtime/reports/.gitkeep
+
+# 3. Artifacts, Reports & Temporary Factory Storage
+artifacts/*
+!artifacts/.gitkeep
+reports/*
+!reports/.gitkeep
+factory/
+.cache/
+*.tmp
+*.bak
+*.pid
+*.log
+*.retry
+*.retry.json
+*.qcow2
+*.iso
+*.img
+
+# 4. Ansible & Python Cache
+.state/
+.ansible/
+__pycache__/
+*.pyc
+*.pyo
+
+# 5. OS & IDE Specific Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# SSH private keys
+vault_ssh_key/
+*.pem
+*.key
+id_ed25519*
+id_rsa*
+
+# GitGuardian local cache
+.cache_ggshield

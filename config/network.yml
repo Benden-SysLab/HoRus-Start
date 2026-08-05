@@ -1,0 +1,10 @@
+# Management Network Topology (config/ - NETWORK PLAN)
+nodes:
+  horus-pmx-node01:
+    management_ip: "192.168.1.210"
+  horus-pmx-node02:
+    management_ip: "192.168.1.220"
+  horus-pmx-node03:
+    management_ip: "192.168.1.230"
+  horus-pmx-node04:
+    management_ip: "192.168.1.240"

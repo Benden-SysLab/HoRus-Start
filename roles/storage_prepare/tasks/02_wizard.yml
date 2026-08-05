@@ -1,0 +1,185 @@
+---
+# 3.2 Storage Classification & Interactive Wizard Tasks
+# PERSISTS OPERATOR DESIRED STATE INTENT INTO config/storage.yml WITHOUT EXECUTING SYSTEM COMMANDS
+
+- name: "3.2.1 [Wizard] Check existence of long-term storage topology config (config/storage.yml)"
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../config/storage.yml"
+  register: storage_yml_stat
+  delegate_to: localhost
+  become: false
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.2 [Wizard] Load persistent storage configuration topology if present"
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/../config/storage.yml"
+    name: storage_config_vars
+  when:
+    - storage_yml_stat.stat.exists
+    - not (force_wizard | default(false) | bool)
+  delegate_to: localhost
+  become: false
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.3 [Wizard] Filter unallocated non-system block devices for node mapping"
+  ansible.builtin.set_fact:
+    node_unallocated_disks: >-
+      {{
+        (node_discovered_disks if (node_discovered_disks is iterable and node_discovered_disks is not string) else (node_discovered_disks | from_json if node_discovered_disks is string else []))
+        | default([]) | selectattr('is_system_disk', 'equalto', false) | list
+      }}
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.4 [Wizard] Determine if Interactive Prompting should run"
+  ansible.builtin.set_fact:
+    prompted_node_storages: []
+    existing_storage_matches: "{{ (storage_config_vars.storage_nodes[inventory_hostname].storages if (storage_config_vars is defined and storage_config_vars.storage_nodes is defined and inventory_hostname in storage_config_vars.storage_nodes) else []) }}"
+    run_interactive_wizard: >-
+      {{
+        (force_wizard | default(false) | bool) or
+        (not storage_yml_stat.stat.exists) or
+        (storage_config_vars is not defined) or
+        (storage_config_vars.storage_nodes is not defined) or
+        (inventory_hostname not in storage_config_vars.storage_nodes) or
+        (not (non_interactive | default(false) | bool))
+      }}
+  tags: ['stage3', 'wizard']
+
+# ------------------------------------------------------------------------------
+# INTERACTIVE DISK PROMPTING WIZARD LOOP (Saves Desired State Intent Only)
+# ------------------------------------------------------------------------------
+- name: "3.2.5 [Wizard] Run Interactive Storage Configuration Prompt for Discovered Disks"
+  ansible.builtin.include_tasks: wizard_prompt_disk.yml
+  loop: "{{ node_unallocated_disks }}"
+  loop_control:
+    loop_var: disk_item
+    label: "{{ disk_item.device }} ({{ disk_item.model }})"
+  when:
+    - run_interactive_wizard | bool
+    - node_unallocated_disks | length > 0
+    - disk_item.size not in ['0B', '0', 'Unknown']
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.6 [Wizard] Consolidate & Canonicalize Storage Desired Targets for {{ inventory_hostname }}"
+  ansible.builtin.set_fact:
+    node_storage_targets: "{{ normalized_targets_builder | from_json }}"
+  vars:
+    raw_targets: >-
+      {{
+        (storage_config_vars.storage_nodes[inventory_hostname].storages
+          if (not run_interactive_wizard | bool and storage_config_vars is defined and storage_config_vars.storage_nodes is defined and inventory_hostname in storage_config_vars.storage_nodes)
+          else (prompted_node_storages | default([])))
+      }}
+    normalized_targets_builder: >-
+      {%- set norm_list = [] -%}
+      {%- for st in raw_targets -%}
+        {%- set raw_t = st.driver | default(st.type | default('dir')) | lower | trim -%}
+        {%- set is_net = (raw_t in ['nfs', 'cifs', 'cephfs', 'pbs', 'rbd']) -%}
+        {%- set is_sh = is_net and ((st.shared | default(false) | bool) or (raw_t == 'shared')) -%}
+        {%- set norm_driver = 'dir' if raw_t in ['dir', 'shared', 'local'] else raw_t -%}
+        {%- set norm_state = st.state | default('present') | lower | trim -%}
+        {%- set _ = norm_list.append(st | combine({
+          'driver': norm_driver,
+          'type': norm_driver,
+          'shared': is_sh,
+          'state': norm_state
+        })) -%}
+      {%- endfor -%}
+      {{ norm_list | to_json }}
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.7 [Wizard] Build persistent storage topology dictionary"
+  ansible.builtin.set_fact:
+    generated_storage_topology:
+      storage_nodes: "{{ generated_nodes | from_json }}"
+      shared_storages: "{{ generated_shared | from_json }}"
+  vars:
+    generated_nodes: >-
+      {
+      {% for h in ansible_play_hosts %}
+        "{{ h }}": {
+          "storages": {{ hostvars[h]['node_storage_targets'] | default([]) | to_json }}
+        }{{ ',' if not loop.last else '' }}
+      {% endfor %}
+      }
+    generated_shared: >-
+      {%- set shared_list = [] -%}
+      {%- for h in ansible_play_hosts -%}
+        {%- for st in hostvars[h]['node_storage_targets'] | default([]) -%}
+          {%- if (st.shared | default(false) | bool) or (st.driver | default('dir') in ['nfs', 'cifs', 'cephfs', 'pbs']) -%}
+            {%- set _ = shared_list.append(st) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ shared_list | to_json }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.8 [Wizard] Save persistent storage topology to config/storage.yml"
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../config/storage.yml"
+    mode: '0644'
+    content: |
+      {{ generated_storage_topology | to_nice_yaml(indent=2, width=200) }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: ['stage3', 'wizard']
+
+- name: "Validate generated storage.yml"
+  ansible.builtin.shell: |
+    python3 <<'PYTHON'
+    import yaml
+    import sys
+
+    path = "{{ playbook_dir }}/../config/storage.yml"
+
+    try:
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
+    except Exception as e:
+        print("Invalid storage topology: Failed to parse YAML: {}".format(e))
+        sys.exit(1)
+
+    try:
+        assert data is not None, "Invalid storage topology: empty file"
+        assert "storage_nodes" in data, "Invalid storage topology: storage_nodes does not exist"
+
+        for node, node_data in data["storage_nodes"].items():
+            assert isinstance(node_data, dict), "Invalid storage topology: node={}".format(node)
+            storages = node_data.get("storages")
+            assert isinstance(storages, list), "Invalid storage topology: node={}, storages must be list".format(node)
+
+            for idx, storage in enumerate(storages):
+                assert isinstance(storage, dict), "Invalid storage topology: node={}, storage_index={}".format(node, idx)
+                assert isinstance(storage.get("content"), list), "Invalid storage topology: node={}, storage_index={}, content must be list".format(node, idx)
+                assert "device" in storage, "Invalid storage topology: node={}, storage_index={}, device missing".format(node, idx)
+                assert "driver" in storage or "type" in storage, "Invalid storage topology: node={}, storage_index={}, driver/type missing".format(node, idx)
+
+    except AssertionError as e:
+        print(e)
+        sys.exit(1)
+
+    print("VALID")
+    PYTHON
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  tags: ['stage3', 'wizard']
+
+- name: "3.2.9 [Wizard] Display Storage Classification Matrix for Node"
+  ansible.builtin.debug:
+    msg:
+      - "=========================================================================="
+      - "Stage 3.2 Storage Interactive Classification Matrix — {{ inventory_hostname }}"
+      - "--------------------------------------------------------------------------"
+      - "Wizard Interactive Run: {{ run_interactive_wizard }}"
+      - "Unallocated Non-System Disks Discovered: {{ node_unallocated_disks | length }}"
+      - "Configured Desired Storage Drives Count: {{ node_storage_targets | length }}"
+      - "Desired Storage Configurations (Single Source of Truth):"
+      - "{{ node_storage_targets }}"
+      - "=========================================================================="
+  tags: ['stage3', 'wizard']

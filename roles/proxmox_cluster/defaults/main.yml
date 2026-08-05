@@ -1,0 +1,4 @@
+---
+# Defaults for proxmox_cluster role
+cluster_name: "HoRus-SysLab"
+master_node: "horus-pmx-node01"

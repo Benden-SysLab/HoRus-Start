@@ -1,0 +1,23 @@
+---
+# ==============================================================================
+# HoRus-Start Single Consolidated Role: bootstrap_connectivity
+# Includes subtasks 0.0 through 0.5
+# ==============================================================================
+
+- name: "Stage 0.0 | Interactive Discovery & Credentials Wizard"
+  ansible.builtin.include_tasks: 00_wizard.yml
+
+- name: "Stage 0.1 | Node Discovery & Connectivity Probe"
+  ansible.builtin.include_tasks: 01_discovery.yml
+
+- name: "Stage 0.2 | Authentication Verification"
+  ansible.builtin.include_tasks: 02_authentication.yml
+
+- name: "Stage 0.3 | SSH Identity Generation (Localhost)"
+  ansible.builtin.include_tasks: 03_ssh_identity.yml
+
+- name: "Stage 0.4 | SSH Key Deployment"
+  ansible.builtin.include_tasks: 04_ssh_deployment.yml
+
+- name: "Stage 0.5 | Key-Only Verification & Report Generation"
+  ansible.builtin.include_tasks: 05_verification.yml

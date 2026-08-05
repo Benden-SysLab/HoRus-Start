@@ -1,0 +1,43 @@
+---
+# Role: security_baseline
+# Implements basic host hardening, sysctl tuning, SSH security controls, and login MOTD banner.
+
+- name: Configure sysctl kernel hardening options for Proxmox networking
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: true
+  loop:
+    - { name: 'net.ipv4.ip_forward', value: '1' }
+    - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
+    - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
+    - { name: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+
+- name: Set SSH security hardening parameters in sshd_config
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - { regexp: '^#?PermitEmptyPasswords', line: 'PermitEmptyPasswords no' }
+    - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
+    - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 5' }
+  notify: Restart sshd
+
+- name: Set HoRus Infrastructure login MOTD banner
+  ansible.builtin.copy:
+    dest: /etc/motd
+    content: |
+      ========================================================================
+             HoRus Infrastructure - Proxmox VE Node Day-0 Bootstrap
+      ========================================================================
+       Node:     {{ inventory_hostname }}
+       Role:     {{ node_role | default('Proxmox Host') }}
+       Cluster:  {{ cluster_name | default('HoRus-Infrastructure') }}
+       Managed:  HoRus-Start (Ansible Day-0)
+      ========================================================================
+    owner: root
+    group: root
+    mode: '0644'

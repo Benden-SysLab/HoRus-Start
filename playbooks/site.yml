@@ -1,0 +1,17 @@
+---
+# ==============================================================================
+# HoRus-Start Master Site Entry Point
+# Stages:
+# Stage 0: Infrastructure Readiness
+# Stage 1: Connectivity & SSH Mesh
+# Stage 2: Base System & Repository Standardization
+# Stage 3: Cluster Formation
+# Stage 4: Storage Provisioning
+# Stage 5: Asset Preparation & Validation
+# ==============================================================================
+
+- import_playbook: 00_bootstrap_connectivity.yml
+- import_playbook: 01_base_system_prep.yml
+- import_playbook: 02_proxmox_cluster.yml
+- import_playbook: 03_storage_prepare.yml
+- import_playbook: 04_proxmox_templates.yml

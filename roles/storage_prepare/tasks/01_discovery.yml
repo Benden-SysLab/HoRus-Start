@@ -1,0 +1,339 @@
+---
+# 3.1 Storage Discovery Tasks: Gather block devices, persistent IDs, filesystems, PVE storage, Ceph & SMART stats
+# FULLY READ-ONLY ENGINE — ZERO MUTATION COMMANDS OR STATE MODIFICATIONS
+
+- name: "3.1.1 [Discovery] Gather raw block device metadata via lsblk"
+  ansible.builtin.command: >
+    lsblk -J -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,SERIAL,VENDOR,UUID,PKNAME,TRAN,WWN
+  register: lsblk_raw
+  changed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.2 [Discovery] Gather persistent disk-by-id symlinks"
+  ansible.builtin.shell: |
+    set -o pipefail
+    for dev in $(lsblk -d -n -o NAME -e 7,11 2>/dev/null | grep -vE '^(nbd|loop|ram|sr|zram|fd|dm-)'); do
+      BY_ID=""
+      for link in /dev/disk/by-id/ata-* /dev/disk/by-id/nvme-* /dev/disk/by-id/scsi-* /dev/disk/by-id/wwn-*; do
+        if [ -L "$link" ]; then
+          TARGET=$(readlink -f "$link" 2>/dev/null || true)
+          if [ "$TARGET" = "/dev/$dev" ]; then
+            BY_ID="$link"
+            break
+          fi
+        fi
+      done
+      echo "$dev:${BY_ID:-/dev/$dev}"
+    done
+  register: by_id_map_raw
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.3 [Discovery] Gather active mounts metadata via findmnt"
+  ansible.builtin.command: findmnt -J
+  register: findmnt_raw
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.4 [Discovery] Retrieve current Proxmox VE registered storages"
+  ansible.builtin.shell: |
+    python3 << 'EOF'
+    import subprocess, json, re, os
+
+    storages = {}
+    cfg_path = "/etc/pve/storage.cfg"
+    if os.path.exists(cfg_path):
+        current_id = None
+        with open(cfg_path, 'r') as f:
+            for line in f:
+                line_s = line.strip()
+                if not line_s or line_s.startswith('#'):
+                    continue
+                m = re.match(r'^([a-z0-9]+):\s*([a-zA-Z0-9_\-]+)', line_s)
+                if m:
+                    backend, s_id = m.group(1), m.group(2)
+                    current_id = s_id
+                    storages[current_id] = {
+                        'storage_id': current_id,
+                        'backend': backend,
+                        'path': '',
+                        'nodes': '',
+                        'shared': False,
+                        'content': [],
+                        'disable': False
+                    }
+                elif current_id and ('\t' in line or line.startswith(' ')):
+                    parts = line_s.split(maxsplit=1)
+                    if len(parts) == 2:
+                        k, v = parts[0].strip(), parts[1].strip()
+                        if k == 'path':
+                            storages[current_id]['path'] = v
+                        elif k == 'nodes':
+                            storages[current_id]['nodes'] = v
+                        elif k == 'shared':
+                            storages[current_id]['shared'] = (v == '1' or v.lower() == 'true')
+                        elif k == 'content':
+                            storages[current_id]['content'] = [c.strip() for c in v.split(',') if c.strip()]
+                        elif k == 'disable':
+                            storages[current_id]['disable'] = (v == '1' or v.lower() == 'true')
+
+    try:
+        pvesm_out = subprocess.check_output(['pvesm', 'status'], text=True, stderr=subprocess.DEVNULL)
+        lines = pvesm_out.strip().splitlines()
+        if len(lines) > 1:
+            for l in lines[1:]:
+                parts = l.split()
+                if parts:
+                    s_id = parts[0]
+                    b_type = parts[1] if len(parts) > 1 else 'dir'
+                    if s_id not in storages:
+                        storages[s_id] = {
+                            'storage_id': s_id,
+                            'backend': b_type,
+                            'path': '',
+                            'nodes': '',
+                            'shared': False,
+                            'content': [],
+                            'disable': False
+                        }
+    except Exception:
+        pass
+
+    print(json.dumps(list(storages.values())))
+    EOF
+  register: pve_storages_raw
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.5 [Discovery] Check active Swap devices via swapon"
+  ansible.builtin.command: swapon --show=NAME -no-headings
+  register: active_swaps_raw
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.6 [Discovery] Check LVM physical volume memberships via pvs"
+  ansible.builtin.command: pvs --noheadings -o pv_name
+  register: lvm_pvs_raw
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.7 [Discovery] Check active ZFS storage pools via zpool status"
+  ansible.builtin.command: zpool status
+  register: zpool_status_raw
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.8 [Discovery] Check Ceph OSD volume memberships via ceph-volume list if available"
+  ansible.builtin.command: ceph-volume lvm list
+  register: ceph_volumes_raw
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.9 [Discovery] Check SMART Health status if smartctl is present"
+  ansible.builtin.command: smartctl -H /dev/sda
+  register: smartctl_raw
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.10 [Discovery] Trace physical parent block device tree of OS root & system partitions"
+  ansible.builtin.shell: |
+    set -o pipefail
+    OS_PARENTS=""
+    FOR_MOUNTS=$(findmnt -n -o SOURCE /,/boot,/boot/efi 2>/dev/null || true)
+    for src in $FOR_MOUNTS; do
+      if [ -b "$src" ]; then
+        PARENT=$(lsblk -p -s -n -o NAME "$src" 2>/dev/null | grep -E '/dev/(sd[a-z]|nvme[0-9]n[0-9]|vd[a-z])' | tail -n1 || true)
+        if [ -n "$PARENT" ]; then
+          OS_PARENTS="$OS_PARENTS $PARENT"
+        fi
+      fi
+    done
+
+    PVE_VG_SRC=$(pvs --noheadings -o pv_name,vg_name 2>/dev/null | grep 'pve' | awk '{print $1}' || true)
+    for src in $PVE_VG_SRC; do
+      if [ -b "$src" ]; then
+        PARENT=$(lsblk -p -s -n -o NAME "$src" 2>/dev/null | grep -E '/dev/(sd[a-z]|nvme[0-9]n[0-9]|vd[a-z])' | tail -n1 || true)
+        if [ -n "$PARENT" ]; then
+          OS_PARENTS="$OS_PARENTS $PARENT"
+        fi
+      fi
+    done
+
+    for p in $OS_PARENTS; do
+      basename "$p" | sed -E 's/p?[0-9]+$//'
+    done | sort -u
+  register: os_disks_detected_raw
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.11 [Discovery] Extract physical parent block device name of OS root disk"
+  ansible.builtin.set_fact:
+    os_disk_names_list: "{{ os_disks_detected_raw.stdout_lines | default([]) }}"
+    os_disk_name: "{{ (os_disks_detected_raw.stdout_lines | default([])) | first | default('sda') }}"
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.12 [Discovery] Parse JSON block devices and Proxmox storages inventory"
+  ansible.builtin.set_fact:
+    lsblk_data: "{{ (lsblk_raw.stdout | from_json).blockdevices | default([]) }}"
+    active_swaps: "{{ active_swaps_raw.stdout_lines | default([]) }}"
+    lvm_pvs: "{{ lvm_pvs_raw.stdout_lines | default([]) | map('trim') | list }}"
+    ceph_str: "{{ ceph_volumes_raw.stdout | default('') }}"
+    by_id_lines: "{{ by_id_map_raw.stdout_lines | default([]) }}"
+    node_pve_storages: "{{ (pve_storages_raw.stdout | default('[]')) | from_json }}"
+    node_pve_storage_ids: "{{ ((pve_storages_raw.stdout | default('[]')) | from_json) | map(attribute='storage_id') | list }}"
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.13 [Discovery] Build rich node storage inventory facts with persistent by_id identifiers"
+  ansible.builtin.set_fact:
+    node_discovered_disks: "{{ disk_list_builder | from_json }}"
+  vars:
+    disk_list_builder: >-
+      {%- set disk_list = [] -%}
+      {%- set id_dict = {} -%}
+      {%- for line in by_id_lines -%}
+        {%- set parts = line.split(':') -%}
+        {%- if parts | length >= 2 -%}
+          {%- set _ = id_dict.update({parts[0]: parts[1]}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- set pve_paths = node_pve_storages | default([]) | map(attribute='path') | select('ne', '') | list -%}
+      {%- for dev in lsblk_data if dev.type == 'disk' -%}
+        {%- set d_name = (dev.name | default('')) | string -%}
+        {%- if not (d_name.startswith('nbd') or d_name.startswith('loop') or d_name.startswith('ram') or d_name.startswith('sr') or d_name.startswith('zram') or d_name.startswith('fd') or d_name.startswith('dm-')) -%}
+        {%- set d_by_id = id_dict.get(d_name, '/dev/' ~ d_name) -%}
+        {%- set d_mount = (dev.mountpoint | default('')) | string if dev.mountpoint is not none else '' -%}
+        {%- set d_fstype = (dev.fstype | default('')) | string if dev.fstype is not none else '' -%}
+        {%- set d_uuid = (dev.uuid | default('')) | string if dev.uuid is not none else '' -%}
+        {%- set d_model = (dev.model | default(dev.vendor | default('Generic Disk'))) | string | trim -%}
+        {%- set d_serial = (dev.serial | default('N/A')) | string | trim -%}
+        {%- set d_size = (dev.size | default('Unknown')) | string -%}
+        {%- set d_tran = (dev.tran | default('SATA/NVMe')) | string | upper -%}
+        {%- set swap_str = (active_swaps | default([])) | join(' ') -%}
+        {%- set sys_list = (os_disk_names_list | default([])) -%}
+        {%- set child_mounts = [] -%}
+        {%- if dev.children is defined and dev.children is iterable -%}
+          {%- for child in dev.children -%}
+            {%- if child.mountpoint is defined and child.mountpoint is not none and child.mountpoint != '' -%}
+              {%- set _ = child_mounts.append(child.mountpoint | string) -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endif -%}
+        {%- set is_ceph = (d_name in ceph_str) -%}
+        {%- set is_sys = (d_name in sys_list) or (d_mount in ['/', '/boot', '/boot/efi']) or ('/' in child_mounts) or ('/boot' in child_mounts) or (d_fstype in ['pve', 'LVM2_member', 'zfs_member', 'ceph_member']) or (d_name != '' and d_name in swap_str) or is_ceph -%}
+        {%- set is_mnt = (d_mount != '') -%}
+        {%- set pve_reg = (d_mount != '' and d_mount in pve_paths) -%}
+        {%- set smart_res = 'PASSED' if (smartctl_raw.rc is defined and smartctl_raw.rc == 0 and 'PASSED' in (smartctl_raw.stdout | default(''))) else 'HEALTHY_GENERIC' -%}
+        {%- set _ = disk_list.append({
+          'device': '/dev/' ~ d_name,
+          'device_by_id': d_by_id,
+          'uuid': d_uuid,
+          'name': d_name,
+          'size': d_size,
+          'model': d_model,
+          'serial': d_serial,
+          'transport': d_tran,
+          'fstype': d_fstype if d_fstype != '' else 'None',
+          'mountpoint': d_mount if d_mount != '' else 'None',
+          'smart_health': smart_res,
+          'is_system_disk': is_sys,
+          'is_ceph_member': is_ceph,
+          'is_mounted': is_mnt,
+          'pve_registered': pve_reg
+        }) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ disk_list | to_json }}
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.14 [Discovery] Ensure runtime/discovery directory exists on localhost"
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../runtime/discovery"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+  run_once: true
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.15 [Discovery] Save raw node storage discovery inventory to runtime/discovery/storage.json"
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../runtime/discovery/storage.json"
+    mode: '0644'
+    content: |
+      {
+        "api_version": "v1",
+        "schema_version": "1.0",
+        "producer": "storage_prepare",
+        "resource_type": "discovery",
+        "stage": 3,
+        "step": "discovery",
+        "timestamp": "{{ ansible_date_time.iso8601 if ansible_date_time is defined else '' }}",
+        "nodes": {
+      {% for h in ansible_play_hosts %}
+          "{{ h }}": {
+            "management_ip": "{{ hostvars[h]['ansible_host'] }}",
+            "os_parent_disk": "{{ hostvars[h]['os_disk_name'] | default('sda') }}",
+            "discovered_disks": {{ hostvars[h]['node_discovered_disks'] | to_json }}
+          }{% if not loop.last %},{% endif %}
+      {% endfor %}
+        }
+      }
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.15b [Discovery] Save PVE Storage inventory to runtime/discovery/pve_storage.json"
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../runtime/discovery/pve_storage.json"
+    mode: '0644'
+    content: |
+      {
+        "api_version": "v1",
+        "schema_version": "1.0",
+        "producer": "storage_prepare",
+        "resource_type": "discovery",
+        "stage": 3,
+        "step": "pve_storage_inventory",
+        "timestamp": "{{ ansible_date_time.iso8601 if ansible_date_time is defined else '' }}",
+        "nodes": {
+      {% for h in ansible_play_hosts %}
+          "{{ h }}": {
+            "pve_storages": {{ hostvars[h]['node_pve_storages'] | default([]) | to_json }}
+          }{% if not loop.last %},{% endif %}
+      {% endfor %}
+        }
+      }
+  delegate_to: localhost
+  become: false
+  run_once: true
+  changed_when: false
+  tags: ['stage3', 'discovery']
+
+- name: "3.1.16 [Discovery] Display Node Storage Inventory Summary Matrix"
+  ansible.builtin.debug:
+    msg:
+      - "=========================================================================="
+      - "Node Storage Discovery Summary: {{ inventory_hostname }} ({{ ansible_host }})"
+      - "--------------------------------------------------------------------------"
+      - "Identified OS Root Parent Device: /dev/{{ os_disk_name }}"
+      - "Active Swap Devices: {{ active_swaps }}"
+      - "Discovered Block Devices Matrix:"
+      - "{{ node_discovered_disks }}"
+      - "Cached Runtime Inventory: runtime/discovery/storage.json"
+      - "=========================================================================="
+  tags: ['stage3', 'discovery']

@@ -1,0 +1,28 @@
+---
+# ==============================================================================
+# HoRus-Start Stage 3 Playbook: Storage Discovery & Provisioning Framework
+# ==============================================================================
+# Goals:
+# 3.1 Discovery: Deep block device discovery, findmnt, pvesm status & System Disk protection
+# 3.2 Classification: Load persistent storage topology from config/storage.yml
+# 3.3 Safety Validation: Pre-check device presence, non-system disk protection & mount conflicts
+# 3.4 Provisioning: Format filesystem using /dev/disk/by-id/, persist /etc/fstab & pvesm add dir
+# 3.5 Verification: Verify pvesm status, active mounts & generate stage3.json report
+# ==============================================================================
+
+- name: "Stage 3 | Storage Discovery & Provisioning for Proxmox VE Nodes"
+  hosts: proxmox_nodes:proxmox:all
+  gather_facts: true
+  become: true
+  vars_files:
+    - "../roles/bootstrap_connectivity/defaults/main.yml"
+  vars:
+    ansible_ssh_private_key_file: "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}"
+
+  pre_tasks:
+    - name: "3.0.1 [Prep] Verify Node Management IP & Connectivity for Storage Setup"
+      ansible.builtin.debug:
+        msg: "Beginning Stage 3 Storage Discovery & Provisioning on {{ inventory_hostname }} ({{ ansible_host }})"
+
+  roles:
+    - role: storage_prepare

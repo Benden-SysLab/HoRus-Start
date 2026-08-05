@@ -1,0 +1,32 @@
+---
+# 2.2 Create Tasks: Initialize new Proxmox VE Cluster if absent on Master node
+- name: "2.2.1 [Create] Check master node cluster state"
+  ansible.builtin.debug:
+    msg: >-
+      Master node ({{ master_node | default('horus-pmx-node01') }}) cluster status:
+      is_in_cluster={{ hostvars[master_node | default('horus-pmx-node01')]['is_in_cluster'] | default(false) }},
+      current_cluster_name={{ hostvars[master_node | default('horus-pmx-node01')]['current_cluster_name'] | default('None') }}
+  run_once: true
+
+- name: "2.2.2 [Create] Initialize new Proxmox VE Cluster on Master node"
+  ansible.builtin.command: >
+    pvecm create {{ cluster_name | default('HoRus-SysLab') }}
+  when:
+    - inventory_hostname == (master_node | default('horus-pmx-node01'))
+    - not (is_in_cluster | default(false))
+  register: pvecm_create_out
+
+- name: "2.2.3 [Create] Wait for corosync configuration initialization on Master node"
+  ansible.builtin.wait_for:
+    path: /etc/pve/corosync.conf
+    state: present
+    timeout: 30
+  when:
+    - inventory_hostname == (master_node | default('horus-pmx-node01'))
+    - pvecm_create_out is defined and pvecm_create_out is changed
+
+- name: "2.2.4 [Create] Display cluster creation result on Master node"
+  ansible.builtin.debug:
+    msg: "✔ Proxmox VE Cluster '{{ cluster_name | default('HoRus-SysLab') }}' active on {{ inventory_hostname }}."
+  when:
+    - inventory_hostname == (master_node | default('horus-pmx-node01'))
