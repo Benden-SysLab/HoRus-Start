@@ -1,4 +1,4 @@
-# HoRus-Start — Proxmox VE IaC Infrastruktur-Plattform
+# HoRus-Start — Proxmox VE IaC Infrastruktur-Plattform (v2.0-RC1)
 
 🌐 **Sprachen**: [English](./README.md) | [Русский](./README.ru.md) | [Українська](./README.uk.md) | [日本語](./README.ja.md) | **Deutsch** | [Français](./README.fr.md)
 
@@ -6,15 +6,15 @@
 
 ## 🏛️ Übersicht & Konzept
 
-**HoRus-Start** ist ein hochverfügbares Infrastructure-as-Code (IaC) Automatisierungs-Framework für das Bootstrapping, die Bereitstellung und die Verwaltung von Bare-Metal Proxmox VE Hypervisor-Clustern. Aufgebaut auf deklarativen Prinzipien, modularen Ansible-Rollen und einem versionierten JSON Runtime API ermöglicht HoRus-Start ein durchgängiges Lifecycle-Management — von der Bare-Metal SSH-Konnektivität bis hin zu verteilten Speichersystemen und Cloud-Image-Templates.
+**HoRus-Start v2** ist ein hochverfügbares Infrastructure-as-Code (IaC) Automatisierungs-Framework für das Bootstrapping und die Bereitstellung von Bare-Metal Proxmox VE Hypervisor-Clustern. Aufgebaut auf deklarativen Prinzipien, modularen Ansible-Rollen und einem versionierten JSON Runtime API v1 ermöglicht HoRus-Start ein durchgängiges Lifecycle-Management — von der Bare-Metal SSH-Konnektivität bis hin zu verteilten Speichersystemen und der Veröffentlichung von Cloud-Image-Katalogen.
 
-> 🔒 **Architektur-Freeze Hinweis (Architecture Freeze)**: Die Stufen 0 bis 4 sind voll funktionsfähig, idempotent und im Rahmen des **Architecture Stabilization Milestone (Pre-Stage 5)** eingefroren.
+> 🔒 **Architektur-Freeze Hinweis (v2.0-RC1)**: Die HoRus-Start Pipeline ist dauerhaft auf die **Stufen 0 bis 5** beschränkt. Die Pipeline endet nach dem Abschluss von Stage 5 (Asset Preparation & Validation). Manuelle Golden-Template-Erstellung, Terraform-Provisionierung und Anwendungs-Deployments erfolgen außerhalb von HoRus-Start.
 
 ---
 
 ## 🚀 Ausführungspipeline & Phasenarchitektur
 
-HoRus-Start erzwingt eine deterministische 5-Stufen-Pipeline über alle Infrastrukturphasen:
+HoRus-Start erzwingt eine deterministische 5-Stufen-Pipeline über alle aktiven Infrastrukturphasen:
 
 ```
 [ Deklarative Konfiguration ] ──► 1. Discovery ──► 2. Normalisierung ──► 3. Planung ──► 4. Bereitstellung ──► 5. Verifizierung & Berichte
@@ -24,15 +24,14 @@ HoRus-Start erzwingt eine deterministische 5-Stufen-Pipeline über alle Infrastr
 
 | Phase | Name | Beschreibung | Status |
 | :--- | :--- | :--- | :--- |
-| **Stage 0** | **Infrastructure Readiness Gate** | Zerstörungsfreie Preflight-Validierung, automatische Vorlagenerstellung für Zugangsdaten und Speicher, Hardware-Auto-Discovery, Hash-Prüfung von Artefakten und Generierung von `stage0.json`. | **STABIL** |
-| **Stage 1** | **Bootstrap Connectivity** | Prüft Erreichbarkeit der Knoten, generiert ed25519 SSH-Schlüssel, verteilt öffentliche Schlüssel und verifiziert passwortlosen Root-SSH-Zugriff. | **STABIL** |
-| **Stage 2** | **Base System Prep** | Konfiguriert APT-Repositorys (pve-no-subscription), führt Kernel-Updates durch, installiert Systemwerkzeuge und optimiert sysctl. | **STABIL** |
-| **Stage 3** | **Proxmox Cluster** | Initialisiert das pvecm Quorum-Cluster auf den Knoten (`horus-pmx-node01` bis `node04`) und richtet corosync ein. | **STABIL** |
+| **Stage 0** | **Infrastructure Readiness Gate** | Preflight-Validierung, Formatierung von Zugangsdaten, Hardware-Auto-Discovery, Hash-Prüfung und Generierung von `stage0.json`. | **STABIL** |
+| **Stage 1** | **Bootstrap Connectivity** | Prüft Erreichbarkeit der Knoten, generiert lokale ed25519 SSH-Schlüssel, verteilt öffentliche Schlüssel und verifiziert passwortlosen Root-SSH-Zugriff. | **STABIL** |
+| **Stage 2** | **Base System Prep** | Konfiguriert APT-Repositorys (Debian 13 Trixie & pve-no-subscription), führt Kernel-Updates durch, installiert Systemwerkzeuge und optimiert sysctl. | **STABIL** |
+| **Stage 3** | **Proxmox Cluster** | Initialisiert das `pvecm` Quorum-Cluster auf den Knoten und richtet corosync ein. | **STABIL** |
 | **Stage 4** | **Storage Prepare** | Sichere Erkennung von Blockgeräten (`/dev/disk/by-id/`), Prüfung der System-OS-Sicherheit, Mount-Planung, Formatierung (ext4/ZFS) und PVE-Speicherregistrierung. | **STABIL** |
-| **Stage 5** | **Golden Image Factory** | Lädt Cloud-OS-Images (Ubuntu, Debian, Alpine) herunter und erstellt Proxmox Cloud-Init VM-Templates. | *Nächste Phase* |
-| **Stage 6** | **Platform Bootstrap** | Management-Infrastruktur-Bereitstellung: terraform-srv, SSH-Schlüssel, Sudoers, API-Token, Service-Accounts. | *Geplant* |
-| **Stage 7** | **Security** | Systemhärtung: sysctl-Tuning, sshd-Konfiguration, fail2ban, motd-Banner, Systemgrenzen (limits). | *Geplant* |
-| **Stage 8** | **Verification** | Vollständiger Plattform-Self-Test (Cluster, Storage, Images, Templates, Users, SSH, Security, Reports). | *Geplant* |
+| **Stage 5** | **Asset Preparation & Validation** | Lädt Cloud-Images, ISO-Kataloge, VirtIO-Treiber und LXC-Caches herunter; veröffentlicht Assets in PVE-Speicher; prüft Hashes & `qemu-img`-Integrität. | **STABIL** |
+
+> 🛑 **Pipeline-Ende**: Die Automatisierung endet nach Stage 5.
 
 ---
 
@@ -68,30 +67,31 @@ Alle öffentlichen Runtime JSON-Objekte entsprechen den Schemas in `schemas/runt
 
 ```
 HoRus-Start/
-├── config/                  # Deklarative Cluster- und Speicher-Konfigurationen (SOT)
+├── .github/                 # CI/CD Workflows (Secret Scanning, YAML Validation, Ansible-Lint)
+├── config/                  # Deklarative Cluster- und Speicher-Konfigurationen
+│   ├── examples/            # Beispiel-Konfigurationen für cluster, network, storage
 │   ├── storage.yml
-│   └── storage_templates/
+│   └── image_catalog.yml
 ├── credentials/             # SSH-Schlüssel und Passwörter (GIT-IGNORED)
-├── docs/                    # Architektur-Dokumentation
-│   └── architecture/
-│       ├── ARCHITECTURE_FREEZE.md
-│       ├── DOMAIN_MODEL.md
-│       ├── PLANNER_SPEC.md
-│       └── RUNTIME_API_V1.md
+├── docs/                    # Architektur-, Betriebs- und Sicherheitsdokumentation
+│   ├── architecture/        # Domänenmodell, Planner-Spezifikation, Runtime API
+│   ├── getting-started/     # Installation, Schnellstart, Anforderungen
+│   ├── operations/          # Fehlerbehebung, Wiederherstellung, Backup
+│   └── security/            # Sicherheitsmodell, Secrets Management, Threat Model
 ├── inventory/               # Ansible Inventar-Definitionen (hosts.yml)
 ├── playbooks/               # Haupt-Playbooks (00_*.yml bis 04_*.yml)
 ├── plugins/                 # Eigene Ansible Filter- und Action-Plugins
-├── roles/                   # Modulare Rollen (storage_prepare, etc.)
+├── roles/                   # Modulare Rollen (storage_prepare, proxmox_templates etc.)
 ├── runtime/                 # Runtime API v1 Objekte (GIT-IGNORED)
-│   ├── discovery/
-│   ├── facts/
-│   ├── plans/
-│   └── reports/
 ├── schemas/                 # JSON Schemas zur Validierung
 ├── scripts/                 # Validierungs- und Prüfskripte
+│   ├── stage0_preflight.py
 │   ├── storage_validate.py
 │   └── validate_schemas.py
 ├── horus-start              # Interaktiver CLI Launcher
+├── SECURITY.md              # Sicherheitsrichtlinie & Schwachstellenmeldung
+├── CONTRIBUTING.md          # Entwicklungsrichtlinien
+├── CODE_OF_CONDUCT.md       # Verhaltenskodex der Community
 └── README.md                # Hauptdokumentation
 ```
 
@@ -112,7 +112,7 @@ python3 scripts/stage0_preflight.py
 # Stage 1: SSH-Konnektivität
 ansible-playbook -i inventory/hosts.yml playbooks/00_bootstrap_connectivity.yml
 
-# Stage 2: Basis-Systemvorbereitung
+# Stage 2: Basis-Systemvorbereitung (Debian 13)
 ansible-playbook -i inventory/hosts.yml playbooks/01_base_system_prep.yml
 
 # Stage 3: Proxmox Cluster-Einrichtung
@@ -123,6 +123,9 @@ ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml -e "sto
 
 # Stage 4: Speichervorbereitung (Ausführung)
 ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml
+
+# Stage 5: Asset-Vorbereitung & Validierung
+ansible-playbook -i inventory/hosts.yml playbooks/04_proxmox_templates.yml
 ```
 
 ### 3. Validierungsskripte ausführen
@@ -138,4 +141,4 @@ python3 scripts/validate_schemas.py
 
 ## 🔒 Sicherheit & Datenschutz
 
-Alle sensiblen Dateien wie private SSH-Schlüssel (`credentials/ssh/*`), Vault-Passwörter (`.vault_pass`), `.env`-Dateien und temporäre Ausführungsprotokolle sind strikt in `.gitignore` eingetragen. Übertragen Sie niemals Zugangsdaten in die Versionskontrolle.
+Alle sensiblen Dateien wie private SSH-Schlüssel (`credentials/ssh/*`), Vault-Passwörter (`.vault_pass`), `.env`-Dateien und Ausführungsprotokolle sind strikt in `.gitignore` eingetragen. Automatische Secret-Scans (`ggshield`) laufen bei jedem Push.

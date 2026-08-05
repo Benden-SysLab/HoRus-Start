@@ -1,4 +1,4 @@
-# HoRus-Start — Proxmox VE IaC インフラストラクチャプラットフォーム
+# HoRus-Start — Proxmox VE IaC インフラストラクチャプラットフォーム (v2.0-RC1)
 
 🌐 **言語**: [English](./README.md) | [Русский](./README.ru.md) | [Українська](./README.uk.md) | **日本語** | [Deutsch](./README.de.md) | [Français](./README.fr.md)
 
@@ -6,15 +6,15 @@
 
 ## 🏛️ 概要とコンセプト
 
-**HoRus-Start** は、ベアメタル Proxmox VE ハイパーバイザークラスタのブートストラップ、プロビジョニング、管理用に設計されたエンタープライズグレードの IaC (Infrastructure-as-Code) 自動化フレームワークです。宣言的原則、モジュール化された Ansible ロール、およびバージョン管理された JSON Runtime API に基づいて構築されており、ベアメタルネットワーク接続から分散ストレージ、クラウドイメージのデプロイメントまで、エンドツーエンドのライフサイクル管理を提供します。
+**HoRus-Start v2** は、ベアメタル Proxmox VE ハイパーバイザークラスタのブートストラップ、プロビジョニング、管理用に設計されたエンタープライズグレードの IaC (Infrastructure-as-Code) 自動化フレームワークです。宣言的原則、モジュール化された Ansible ロール、およびバージョン管理された JSON Runtime API v1 に基づいて構築されており、ベアメタルネットワーク接続から分散ストレージ、クラウドイメージカタログの公開まで、一貫したライフサイクル管理を提供します。
 
-> 🔒 **アーキテクチャフリーズ通知 (Architecture Freeze)**: ステージ 0〜4 は完全かつ冪等に動作し、**Architecture Stabilization Milestone (Pre-Stage 5)** のもとで固定されています。
+> 🔒 **アーキテクチャフリーズ通知 (v2.0-RC1)**: HoRus-Start パイプラインは恒久的に**ステージ 0〜5** に限定されています。パイプラインは Stage 5 (Asset Preparation & Validation) の完了をもって終了します。手動での Golden テンプレート作成、Terraform によるプロビジョニング、アプリケーションのデプロイは HoRus-Start のスコープ外で実行されます。
 
 ---
 
 ## 🚀 実行パイプラインとステージ構成
 
-HoRus-Start は、すべてのインフラステージで決定論的な 5 ステップのパイプラインを適用します。
+HoRus-Start は、すべての有効なインフラステージで決定論的な 5 ステップのパイプラインを適用します。
 
 ```
 [ 宣言的設定 ] ──► 1. 検出 (Discovery) ──► 2. 正規化 (Normalization) ──► 3. 計画 (Planning) ──► 4. 適用 (Provisioning) ──► 5. 検証とレポート (Verification & Reports)
@@ -24,15 +24,14 @@ HoRus-Start は、すべてのインフラステージで決定論的な 5 ス�
 
 | ステージ | 名称 | 説明 | 状態 |
 | :--- | :--- | :--- | :--- |
-| **Stage 0** | **Infrastructure Readiness Gate** | 読み取り専用事前検証（Preflight）、資格情報・ストレージテンプレートの自動生成、ハードウェアの自動検出、配布物のハッシュ検証、`stage0.json` の発行。 | **安定** |
-| **Stage 1** | **Bootstrap Connectivity** | ターゲットノードの接続確認、ed25519 SSH 鍵の生成、公開鍵のデプロイ、およびパスワードなし root SSH アクセスの検証。 | **安定** |
-| **Stage 2** | **Base System Prep** | APT リポジトリ (pve-no-subscription) の設定、カーネル更新、コアツールセットのインストール、および sysctl チューニング。 | **安定** |
-| **Stage 3** | **Proxmox Cluster** | ノード間 (`horus-pmx-node01` 〜 `node04`) の pvecm クォーラムクラスタの初期化、corosync ネットワークリンクの設定。 | **安定** |
-| **Stage 4** | **Storage Prepare** | 物理ブロックデバイス (`/dev/disk/by-id/`) の safe な検出、OS ディスクの安全性検証、マウント計画、ext4/ZFS フォーマット、および PVE ストレージ登録。 | **安定** |
-| **Stage 5** | **Golden Image Factory** | クラウド OS イメージ (Ubuntu, Debian, Alpine) のダウンロードと Proxmox Cloud-Init VM テンプレートの作成。 | *次ステージ* |
-| **Stage 6** | **Platform Bootstrap** | プラットフォームの初期ブートストラップと基盤サービスの構築。 | *計画中* |
-| **Stage 7** | **Security** | セキュリティの強化、アクセス制御、証明書管理およびセキュリティポリシーの適用。 | *計画中* |
-| **Stage 8** | **Verification** | デプロイ後の検証、ソフトウェアスタックおよびユーザーアカウントの設定検証。 | *計画中* |
+| **Stage 0** | **Infrastructure Readiness Gate** | 事前検証（Preflight）、資格情報フォーマット、ハードウェアの自動検出、ハッシュ検証、`stage0.json` の発行。 | **安定** |
+| **Stage 1** | **Bootstrap Connectivity** | ターゲットノードの接続確認、ローカル ed25519 SSH 鍵の生成、公開鍵のデプロイ、パスワードなし root SSH アクセスの検証。 | **安定** |
+| **Stage 2** | **Base System Prep** | APT リポジトリ (Debian 13 Trixie & pve-no-subscription) の設定、カーネル更新、コアツールのインストール、sysctl チューニング。 | **安定** |
+| **Stage 3** | **Proxmox Cluster** | ノード間の `pvecm` クォーラムクラスタの初期化、corosync ネットワークリンクの設定。 | **安定** |
+| **Stage 4** | **Storage Prepare** | 物理ブロックデバイス (`/dev/disk/by-id/`) の安全な検出、OS ディスクの安全性検証、マウント計画、ext4/ZFS フォーマット、PVE ストレージ登録。 | **安定** |
+| **Stage 5** | **Asset Preparation & Validation** | クラウド OS イメージ、ISO カタログ、VirtIO ドライバー、LXC キャッシュのダウンロード、PVE ストレージへの公開、ハッシュおよび `qemu-img` 整合性検証。 | **安定** |
+
+> 🛑 **パイプライン終了**: 自動化は Stage 5 完了後に終了します。
 
 ---
 
@@ -68,30 +67,31 @@ HoRus-Start のステージ間連携は **Runtime API v1** によって管理さ
 
 ```
 HoRus-Start/
+├── .github/                 # CI/CD ワークフロー（シークレットスキャン、YAML検証、ansible-lint）
 ├── config/                  # 宣言的クラスタおよびストレージ設定 (SOT)
+│   ├── examples/            # cluster, network, storage 設定のサンプル
 │   ├── storage.yml
-│   └── storage_templates/
+│   └── image_catalog.yml
 ├── credentials/             # SSH 鍵およびパスワード (GIT 対象外)
-├── docs/                    # アーキテクチャドキュメント
-│   └── architecture/
-│       ├── ARCHITECTURE_FREEZE.md
-│       ├── DOMAIN_MODEL.md
-│       ├── PLANNER_SPEC.md
-│       └── RUNTIME_API_V1.md
+├── docs/                    # アーキテクチャ、運用、セキュリティドキュメント
+│   ├── architecture/        # ドメインモデル、プランナースペック、Runtime API
+│   ├── getting-started/     # インストール、クイックスタート、要件
+│   ├── operations/          # トラブルシューティング、リカバリ、バックアップ
+│   └── security/            # セキュリティモデル、シークレット管理、脅威モデル
 ├── inventory/               # Ansible インベントリ定義 (hosts.yml)
 ├── playbooks/               # 実行プレイブック (00_*.yml 〜 04_*.yml)
 ├── plugins/                 # カスタム Ansible フィルタ・アクションプラグイン
-├── roles/                   # モジュール化されたドメインロール (storage_prepare 等)
+├── roles/                   # モジュール化されたドメインロール (storage_prepare, proxmox_templates等)
 ├── runtime/                 # Runtime API v1 オブジェクト (GIT 対象外)
-│   ├── discovery/
-│   ├── facts/
-│   ├── plans/
-│   └── reports/
 ├── schemas/                 # JSON スキーマ
 ├── scripts/                 # 検証およびスキーマ確認スクリプト
+│   ├── stage0_preflight.py
 │   ├── storage_validate.py
 │   └── validate_schemas.py
 ├── horus-start              # 対話型 CLI ランチャー
+├── SECURITY.md              # セキュリティポリシーと脆弱性報告
+├── CONTRIBUTING.md          # 貢献ガイドライン
+├── CODE_OF_CONDUCT.md       # コミュニティ行動規範
 └── README.md                # メインプライマリドキュメント
 ```
 
@@ -112,7 +112,7 @@ python3 scripts/stage0_preflight.py
 # Stage 1: 接続ブートストラップ
 ansible-playbook -i inventory/hosts.yml playbooks/00_bootstrap_connectivity.yml
 
-# Stage 2: 基本システム準備
+# Stage 2: 基本システム準備 (Debian 13)
 ansible-playbook -i inventory/hosts.yml playbooks/01_base_system_prep.yml
 
 # Stage 3: Proxmox クラスタ構築
@@ -123,6 +123,9 @@ ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml -e "sto
 
 # Stage 4: ストレージ準備 (適用実行)
 ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml
+
+# Stage 5: アセット準備と検証
+ansible-playbook -i inventory/hosts.yml playbooks/04_proxmox_templates.yml
 ```
 
 ### 3. 検証スクリプトの実行
@@ -138,4 +141,4 @@ python3 scripts/validate_schemas.py
 
 ## 🔒 セキュリティとプライバシー
 
-SSH 秘密鍵 (`credentials/ssh/*`)、Ansible Vault パスワード (`.vault_pass`)、`.env` ファイル、および一時ログは `.gitignore` によって厳格に除外されています。認証情報をバージョン管理にコミットしないでください。
+SSH 秘密鍵 (`credentials/ssh/*`)、パスワード、Ansible Vault パスワード (`.vault_pass`)、`.env` ファイル、および実行ログは `.gitignore` によって厳格に除外されています。自動シークレットスキャン (`ggshield`) がプッシュごとに実行されます。

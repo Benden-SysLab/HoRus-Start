@@ -1,0 +1,47 @@
+name: YAML & Schema Validation
+
+on:
+  push:
+    branches: [ main, master, "v2*" ]
+  pull_request:
+    branches: [ main, master, "v2*" ]
+
+jobs:
+  validate_yaml:
+    name: YAML Syntax & Runtime Schema Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install jsonschema pyyaml
+
+      - name: Validate YAML files
+        run: |
+          python -c "
+          import glob, yaml, sys
+          files = glob.glob('**/*.yml', recursive=True) + glob.glob('**/*.yaml', recursive=True)
+          errors = 0
+          for f in files:
+              try:
+                  with open(f, 'r', encoding='utf-8') as fh:
+                      yaml.safe_load(fh)
+              except Exception as e:
+                  print(f'YAML Syntax Error in {f}: {e}')
+                  errors += 1
+          if errors > 0:
+              sys.exit(1)
+          print(f'Successfully validated {len(files)} YAML files.')
+          "
+
+      - name: Validate Runtime API Schemas
+        run: |
+          python scripts/validate_schemas.py

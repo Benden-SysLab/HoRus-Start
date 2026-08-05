@@ -1,20 +1,20 @@
-# HoRus-Start — Proxmox VE IaC Infrastructure Platform
+# HoRus-Start — Proxmox VE IaC Infrastructure Platform (v2.0-RC1)
 
 🌐 **Languages**: **English** | [Русский](./README.ru.md) | [Українська](./README.uk.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Français](./README.fr.md)
 
 ---
 
-## 🏛️ Executive Summary & Vision
+## 🏛️ Executive Summary & Architectural Scope
 
-**HoRus-Start** is an enterprise-grade Infrastructure-as-Code (IaC) automation framework designed for bootstrapping, provisioning, and managing bare-metal Proxmox VE hypervisor clusters. Built upon declarative principles, modular Ansible roles, and versioned JSON Runtime APIs, HoRus-Start provides end-to-end lifecycle management from bare-metal network connectivity to distributed storage and cloud image deployment.
+**HoRus-Start v2** is an enterprise-grade Infrastructure-as-Code (IaC) automation framework designed for bootstrapping bare-metal Proxmox VE hypervisor clusters. Built upon declarative principles, modular Ansible roles, and versioned JSON Runtime APIs (v1), HoRus-Start provides deterministic automation from bare-metal network readiness to distributed storage reconciliation and OS asset publication.
 
-> 🔒 **Architecture Freeze Notice**: Stages 0–4 are fully operational, idempotent, and stabilized under **Architecture Stabilization Milestone (Pre-Stage 5)**.
+> 🔒 **Architecture Freeze Notice (v2.0-RC1)**: The HoRus-Start pipeline is frozen and permanently limited to **Stages 0 through 5**. The pipeline finishes upon completing Stage 5 (Asset Preparation & Validation). Manual Golden Template creation, Terraform provisioning, and application deployments operate outside HoRus-Start.
 
 ---
 
 ## 🚀 Execution Pipeline & Stage Architecture
 
-HoRus-Start enforces a deterministic 5-step pipeline across all infrastructure stages:
+HoRus-Start enforces a deterministic 5-step lifecycle across all active infrastructure stages:
 
 ```
 [ Declarative Config ] ──► 1. Discovery ──► 2. Normalization ──► 3. Planning ──► 4. Provisioning ──► 5. Verification & Reports
@@ -24,19 +24,18 @@ HoRus-Start enforces a deterministic 5-step pipeline across all infrastructure s
 
 | Stage | Name | Description | Status |
 | :--- | :--- | :--- | :--- |
-| **Stage 0** | **Infrastructure Readiness Gate** | Non-destructive preflight validation, credentials bootstrapping, hardware auto-discovery, artifact checksum verification, and `stage0.json` gate generation. | **STABLE** |
-| **Stage 1** | **Bootstrap Connectivity** | Probes target nodes, generates ed25519 SSH keys, deploys public keys, and validates passwordless root SSH access. | **STABLE** |
-| **Stage 2** | **Base System Prep** | Configures APT repositories (pve-no-subscription), performs kernel updates, installs core toolsets, and tunes sysctl settings. | **STABLE** |
-| **Stage 3** | **Proxmox Cluster** | Initializes pvecm quorum cluster across nodes (`horus-pmx-node01` through `node04`), configures corosync network links. | **STABLE** |
-| **Stage 4** | **Storage Prepare** | Safely discovers physical block devices (`/dev/disk/by-id/`), validates OS disk safety, plans mounts, formats ext4/ZFS, and registers PVE directory volumes. | **STABLE** |
-| **Stage 5** | **Golden Image Factory** | Downloads cloud OS images (Ubuntu, Debian, Alpine), creates Proxmox Cloud-Init VM templates. | *Next Stage* |
-| **Stage 6** | **Platform Bootstrap** | Management infrastructure setup: terraform-srv, dedicated SSH keys, sudoers, API tokens, and service accounts. | *Planned* |
-| **Stage 7** | **Security** | System security hardening: sysctl kernel parameters, sshd configuration, fail2ban, motd banners, and system limits. | *Planned* |
-| **Stage 8** | **Verification** | Full platform self-test auditing Cluster, Storage, Images, Templates, Users, SSH, Security, and Reports. | *Planned* |
+| **Stage 0** | **Infrastructure Readiness Gate** | Preflight validation, credential formatting, host discovery, checksum verification, and `stage0.json` gate generation. | **STABLE** |
+| **Stage 1** | **Bootstrap Connectivity** | Probes target nodes, generates local ed25519 SSH keys, deploys public keys, and validates passwordless root SSH access. | **STABLE** |
+| **Stage 2** | **Base System Prep** | Configures APT repositories (Debian 13 Trixie & PVE no-subscription), updates kernel, installs base toolsets, tunes sysctl parameters. | **STABLE** |
+| **Stage 3** | **Proxmox Cluster** | Initializes `pvecm` quorum cluster across nodes, configures corosync inter-node network links. | **STABLE** |
+| **Stage 4** | **Storage Prepare** | Discovers physical block devices (`/dev/disk/by-id/`), asserts OS disk safety, plans mounts, formats ext4/ZFS, and registers PVE directory volumes. | **STABLE** |
+| **Stage 5** | **Asset Preparation & Validation** | Downloads cloud images, ISO catalog, VirtIO drivers, and LXC template caches; publishes assets to PVE storage; validates checksums & `qemu-img` integrity. | **STABLE** |
+
+> 🛑 **Pipeline Termination**: The automation pipeline ends after Stage 5.
 
 ---
 
-## 💾 Stage 4 Storage Framework Architecture
+## 💾 Storage Framework Architecture (Stage 4)
 
 Stage 4 provides a production-grade storage reconciliation engine:
 
@@ -68,30 +67,31 @@ All public runtime JSON objects adhere to schemas in `schemas/runtime/` and cont
 
 ```
 HoRus-Start/
-├── config/                  # Declarative cluster & storage configurations (SOT)
+├── .github/                 # CI/CD Workflows (secret scan, yaml validation, ansible lint)
+├── config/                  # Declarative cluster & storage configurations
+│   ├── examples/            # Example cluster, network, and storage configurations
 │   ├── storage.yml
-│   └── storage_templates/
+│   └── image_catalog.yml
 ├── credentials/             # Local SSH keys and vault credentials (GIT-IGNORED)
-├── docs/                    # Architecture documentation & frozen contracts
-│   └── architecture/
-│       ├── ARCHITECTURE_FREEZE.md
-│       ├── DOMAIN_MODEL.md
-│       ├── PLANNER_SPEC.md
-│       └── RUNTIME_API_V1.md
+├── docs/                    # Architecture, Getting Started, Operations & Security docs
+│   ├── architecture/        # Domain model, planner spec, runtime API specifications
+│   ├── getting-started/     # Installation, Quickstart, Requirements
+│   ├── operations/          # Troubleshooting, Recovery, Backup & Restore
+│   └── security/            # Security Model, Secrets Management, Threat Model
 ├── inventory/               # Ansible inventory definitions (hosts.yml)
 ├── playbooks/               # Main execution playbooks (00_*.yml through 04_*.yml)
 ├── plugins/                 # Custom Ansible filter & action plugins
-├── roles/                   # Modular domain roles (storage_prepare, etc.)
+├── roles/                   # Modular domain roles (storage_prepare, proxmox_templates, etc.)
 ├── runtime/                 # Versioned Runtime API v1 objects (GIT-IGNORED)
-│   ├── discovery/
-│   ├── facts/
-│   ├── plans/
-│   └── reports/
 ├── schemas/                 # JSON Schemas for config and runtime validation
-├── scripts/                 # Validation and schema verification utilities
+├── scripts/                 # Validation and preflight CLI tools
+│   ├── stage0_preflight.py
 │   ├── storage_validate.py
 │   └── validate_schemas.py
 ├── horus-start              # Interactive CLI launcher
+├── SECURITY.md              # Security policy & vulnerability reporting
+├── CONTRIBUTING.md          # Contribution guidelines
+├── CODE_OF_CONDUCT.md       # Community standards
 └── README.md                # Primary documentation
 ```
 
@@ -109,10 +109,10 @@ HoRus-Start/
 # Stage 0: Infrastructure Readiness Gate (Preflight Control Plane)
 python3 scripts/stage0_preflight.py
 
-# Stage 1: Connectivity Bootstrap
+# Stage 1: Connectivity Bootstrap & SSH Mesh
 ansible-playbook -i inventory/hosts.yml playbooks/00_bootstrap_connectivity.yml
 
-# Stage 2: Base System Prep
+# Stage 2: Base System Prep & Debian 13 Standardization
 ansible-playbook -i inventory/hosts.yml playbooks/01_base_system_prep.yml
 
 # Stage 3: Proxmox Cluster Setup
@@ -123,6 +123,9 @@ ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml -e "sto
 
 # Stage 4: Storage Preparation (Provisioning execution)
 ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml
+
+# Stage 5: Asset Preparation & Validation
+ansible-playbook -i inventory/hosts.yml playbooks/04_proxmox_templates.yml
 ```
 
 ### 3. Run Validation Scripts
@@ -138,4 +141,4 @@ python3 scripts/validate_schemas.py
 
 ## 🔒 Security & Privacy
 
-All sensitive files, including private SSH keys (`credentials/ssh/*`), vault passwords (`.vault_pass`), `.env` files, and temporary execution logs are strictly ignored in `.gitignore`. Never commit credentials to version control.
+All sensitive files, including private SSH keys (`credentials/ssh/*`), passwords, vault files (`.vault_pass`), `.env` files, and execution logs are strictly ignored by `.gitignore`. Secret scanning guards (`ggshield`) and YAML validators run automatically on every repository push.

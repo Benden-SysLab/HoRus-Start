@@ -1,0 +1,21 @@
+# Example Storage Reconciliation Configuration (config/storage.yml)
+shared_storages: []
+storage_nodes:
+  node01:
+    storages:
+      - name: storage-infra
+        device: /dev/disk/by-id/ata-EXAMPLE_DISK_SERIAL_01
+        driver: dir
+        type: dir
+        fstype: ext4
+        mount_point: /mnt/pve/storage-infra
+        purpose: Infrastructure templates and images
+        shared: false
+        state: present
+        force_format: true
+        content:
+          - images
+          - rootdir
+          - iso
+          - vztmpl
+          - backup

@@ -1,0 +1,28 @@
+name: Ansible Quality Audit
+
+on:
+  push:
+    branches: [ main, master, "v2*" ]
+  pull_request:
+    branches: [ main, master, "v2*" ]
+
+jobs:
+  ansible_lint:
+    name: Ansible Playbooks & Roles Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Ansible Lint
+        run: |
+          pip install ansible-lint ansible-core
+
+      - name: Run Ansible Lint
+        run: |
+          ansible-lint playbooks/*.yml --exclude .cache || true

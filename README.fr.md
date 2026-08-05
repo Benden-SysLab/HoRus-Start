@@ -1,4 +1,4 @@
-# HoRus-Start — Plateforme IaC pour l'infrastructure Proxmox VE
+# HoRus-Start — Plateforme IaC pour l'infrastructure Proxmox VE (v2.0-RC1)
 
 🌐 **Langues**: [English](./README.md) | [Русский](./README.ru.md) | [Українська](./README.uk.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | **Français**
 
@@ -6,9 +6,9 @@
 
 ## 🏛️ Présentation et concept
 
-**HoRus-Start** est un framework d'automatisation IaC (Infrastructure-as-Code) de niveau entreprise conçu pour le déploiement, la préparation et la gestion de clusters d'hyperviseurs Proxmox VE bare-metal. Basé sur des principes déclaratifs, des rôles Ansible modulaires et une API Runtime JSON versionnée, HoRus-Start offre une gestion complète du cycle de vie — de la connectivité SSH bare-metal jusqu'au stockage distribué et aux modèles d'images cloud.
+**HoRus-Start v2** est un framework d'automatisation IaC (Infrastructure-as-Code) de niveau entreprise conçu pour le déploiement et la préparation de clusters d'hyperviseurs Proxmox VE bare-metal. Basé sur des principes déclaratifs, des rôles Ansible modulaires et une API Runtime JSON v1 versionnée, HoRus-Start offre une gestion complète du cycle de vie — de la connectivité SSH bare-metal jusqu'au stockage distribué et à la publication du catalogue d'images cloud.
 
-> 🔒 **Avis de gel d'architecture (Architecture Freeze)**: Les étapes 0 à 4 sont entièrement fonctionnelles, idempotentes et gelées dans le cadre du **Architecture Stabilization Milestone (Pre-Stage 5)**.
+> 🔒 **Avis de gel d'architecture (v2.0-RC1)**: Le pipeline HoRus-Start est définitivement limité aux **Étapes 0 à 5**. Le pipeline se termine après l'exécution de l'Étape 5 (Asset Preparation & Validation). La création manuelle de modèles Golden, le déploiement via Terraform et l'installation d'applications s'effectuent en dehors de HoRus-Start.
 
 ---
 
@@ -24,15 +24,14 @@ HoRus-Start applique un pipeline déterministe en 5 étapes pour toutes les phas
 
 | Étape | Nom | Description | Statut |
 | :--- | :--- | :--- | :--- |
-| **Stage 0** | **Infrastructure Readiness Gate** | Validation pré-vol non destructive, génération automatique des modèles d'identifiants et de stockage, auto-découverte du matériel, vérification des empreintes d'artefacts et émission de `stage0.json`. | **STABLE** |
-| **Stage 1** | **Bootstrap Connectivity** | Vérifie l'accessibilité des nœuds, génère les clés SSH ed25519, déploie les clés publiques et valide l'accès SSH root sans mot de passe. | **STABLE** |
-| **Stage 2** | **Base System Prep** | Configure les dépôts APT (pve-no-subscription), effectue les mises à jour du noyau, installe les outils de base et ajuste sysctl. | **STABLE** |
-| **Stage 3** | **Proxmox Cluster** | Initialise le cluster pvecm quorum sur les nœuds (`horus-pmx-node01` à `node04`) et configure le réseau corosync. | **STABLE** |
+| **Stage 0** | **Infrastructure Readiness Gate** | Validation pré-vol, formatage des identifiants, auto-découverte du matériel, vérification des empreintes et émission de `stage0.json`. | **STABLE** |
+| **Stage 1** | **Bootstrap Connectivity** | Vérifie l'accessibilité des nœuds, génère les clés SSH ed25519 locales, déploie les clés publiques et valide l'accès SSH root sans mot de passe. | **STABLE** |
+| **Stage 2** | **Base System Prep** | Configure les dépôts APT (Debian 13 Trixie & pve-no-subscription), met à jour le noyau, installe les outils de base et ajuste sysctl. | **STABLE** |
+| **Stage 3** | **Proxmox Cluster** | Initialise le cluster `pvecm` quorum sur les nœuds et configure le réseau corosync. | **STABLE** |
 | **Stage 4** | **Storage Prepare** | Découverte sécurisée des disques physiques (`/dev/disk/by-id/`), vérification de la sécurité du disque système, planification, formatage ext4/ZFS et enregistrement des volumes PVE. | **STABLE** |
-| **Stage 5** | **Golden Image Factory** | Téléchargement des images cloud (Ubuntu, Debian, Alpine) et création des modèles de VM Cloud-Init Proxmox. | *Étape suivante* |
-| **Stage 6** | **Platform Bootstrap** | Infrastructure de gestion : création de terraform-srv, clés SSH, sudoers, jetons API et comptes de service. | *Planifié* |
-| **Stage 7** | **Security** | Sécurisation du système : ajustements sysctl, configuration sshd, fail2ban, bannières motd, limites système. | *Planifié* |
-| **Stage 8** | **Verification** | Auto-test complet de la plateforme (Cluster, Storage, Images, Templates, Users, SSH, Security, Reports). | *Planifié* |
+| **Stage 5** | **Asset Preparation & Validation** | Télécharge les images cloud, catalogues ISO, pilotes VirtIO et caches LXC ; publie les ressources sur le stockage PVE ; valide les empreintes et l'intégrité `qemu-img`. | **STABLE** |
+
+> 🛑 **Fin du pipeline**: L'automatisation s'arrête définitivement après Stage 5.
 
 ---
 
@@ -68,30 +67,31 @@ Tous les objets JSON runtime publics respectent les schémas définis dans `sche
 
 ```
 HoRus-Start/
+├── .github/                 # Workflows CI/CD (analyse des secrets, validation YAML, ansible-lint)
 ├── config/                  # Configurations déclaratives du cluster et du stockage (SOT)
+│   ├── examples/            # Exemples de configurations cluster, network, storage
 │   ├── storage.yml
-│   └── storage_templates/
+│   └── image_catalog.yml
 ├── credentials/             # Clés SSH et mots de passe (IGNORÉS DANS GIT)
-├── docs/                    # Documentation d'architecture
-│   └── architecture/
-│       ├── ARCHITECTURE_FREEZE.md
-│       ├── DOMAIN_MODEL.md
-│       ├── PLANNER_SPEC.md
-│       └── RUNTIME_API_V1.md
+├── docs/                    # Documentation d'architecture, d'exploitation et de sécurité
+│   ├── architecture/        # Spécifications du modèle de domaine, du planificateur et de l'API Runtime
+│   ├── getting-started/     # Installation, Démarrage rapide, Prérequis
+│   ├── operations/          # Dépannage, Récupération, Sauvegarde & Restauration
+│   └── security/            # Modèle de sécurité, Gestion des secrets, Modèle de menace
 ├── inventory/               # Définitions de l'inventaire Ansible (hosts.yml)
 ├── playbooks/               # Playbooks d'exécution principaux (00_*.yml à 04_*.yml)
 ├── plugins/                 # Plugins de filtres et d'actions Ansible personnalisés
-├── roles/                   # Rôles modulaires (storage_prepare, etc.)
+├── roles/                   # Rôles modulaires (storage_prepare, proxmox_templates, etc.)
 ├── runtime/                 # Objets Runtime API v1 (IGNORÉS DANS GIT)
-│   ├── discovery/
-│   ├── facts/
-│   ├── plans/
-│   └── reports/
 ├── schemas/                 # Schémas JSON de validation
 ├── scripts/                 # Scripts de vérification et de validation
+│   ├── stage0_preflight.py
 │   ├── storage_validate.py
 │   └── validate_schemas.py
 ├── horus-start              # Lanceur CLI interactif
+├── SECURITY.md              # Politique de sécurité et signalement des vulnérabilités
+├── CONTRIBUTING.md          # Guide de contribution
+├── CODE_OF_CONDUCT.md       # Code de conduite de la communauté
 └── README.md                # Documentation principale
 ```
 
@@ -112,7 +112,7 @@ python3 scripts/stage0_preflight.py
 # Stage 1: Connectivité SSH
 ansible-playbook -i inventory/hosts.yml playbooks/00_bootstrap_connectivity.yml
 
-# Stage 2: Préparation de base du système
+# Stage 2: Préparation de base du système (Debian 13)
 ansible-playbook -i inventory/hosts.yml playbooks/01_base_system_prep.yml
 
 # Stage 3: Configuration du cluster Proxmox VE
@@ -123,6 +123,9 @@ ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml -e "sto
 
 # Stage 4: Préparation du stockage (Exécution réelle)
 ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml
+
+# Stage 5: Préparation et validation des ressources
+ansible-playbook -i inventory/hosts.yml playbooks/04_proxmox_templates.yml
 ```
 
 ### 3. Exécuter les scripts de vérification
@@ -138,4 +141,4 @@ python3 scripts/validate_schemas.py
 
 ## 🔒 Sécurité et confidentialité
 
-Tous les fichiers sensibles, y compris les clés SSH privées (`credentials/ssh/*`), les mots de passe Vault (`.vault_pass`), les fichiers `.env` et les journaux temporaires sont strictement ignorés via `.gitignore`. Ne commitez jamais de secrets dans le contrôle de version.
+Tous les fichiers sensibles, y compris les clés SSH privées (`credentials/ssh/*`), les mots de passe Vault (`.vault_pass`), les fichiers `.env` et les journaux d'exécution sont strictement ignorés via `.gitignore`. L'analyse automatique des secrets (`ggshield`) s'exécute à chaque push.
