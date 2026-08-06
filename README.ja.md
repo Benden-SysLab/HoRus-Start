@@ -8,7 +8,7 @@
 
 **HoRus-Start v2** は、ベアメタル Proxmox VE ハイパーバイザークラスタのブートストラップ、プロビジョニング、管理用に設計されたエンタープライズグレードの IaC (Infrastructure-as-Code) 自動化フレームワークです。宣言的原則、モジュール化された Ansible ロール、およびバージョン管理された JSON Runtime API v1 に基づいて構築されており、ベアメタルネットワーク接続から分散ストレージ、クラウドイメージカタログの公開まで、一貫したライフサイクル管理を提供します。
 
-> 🔒 **アーキテクチャフリーズ通知 (v2.0-RC1)**: HoRus-Start パイプラインは恒久的に**ステージ 0〜5** に限定されています。パイプラインは Stage 5 (Asset Preparation & Validation) の完了をもって終了します。手動での Golden テンプレート作成、Terraform によるプロビジョニング、アプリケーションのデプロイは HoRus-Start のスコープ外で実行されます。
+> 🔒 **アーキテクチャフリーズ通知 (v2.0-RC1)**: HoRus-Start パイプラインは恒久的に**ステージ 0〜5** に限定されています。パイプラインは Stage 5 (Asset Preparation & Validation) の完了をもって終了します。手動での Golden テンプレート作成、Terraform によるプロビジョニング、アプリケーションのデプロイは HoRus-Start のスコープ外で実行されます。手動 Golden テンプレート作成 (VM ID 9000 Base, VM ID 9001 Docker, LXC テンプレートおよび SRE 標準) の詳細手順は [docs/golden-images/](./docs/golden-images/) に記載されています。
 
 ---
 
@@ -76,6 +76,7 @@ HoRus-Start/
 ├── docs/                    # アーキテクチャ、運用、セキュリティドキュメント
 │   ├── architecture/        # ドメインモデル、プランナースペック、Runtime API
 │   ├── getting-started/     # インストール、クイックスタート、要件
+│   ├── golden-images/       # Golden VM および LXC テンプレート作成ガイド
 │   ├── operations/          # トラブルシューティング、リカバリ、バックアップ
 │   └── security/            # セキュリティモデル、シークレット管理、脅威モデル
 ├── inventory/               # Ansible インベントリ定義 (hosts.yml)

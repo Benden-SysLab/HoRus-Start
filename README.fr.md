@@ -8,7 +8,7 @@
 
 **HoRus-Start v2** est un framework d'automatisation IaC (Infrastructure-as-Code) de niveau entreprise conçu pour le déploiement et la préparation de clusters d'hyperviseurs Proxmox VE bare-metal. Basé sur des principes déclaratifs, des rôles Ansible modulaires et une API Runtime JSON v1 versionnée, HoRus-Start offre une gestion complète du cycle de vie — de la connectivité SSH bare-metal jusqu'au stockage distribué et à la publication du catalogue d'images cloud.
 
-> 🔒 **Avis de gel d'architecture (v2.0-RC1)**: Le pipeline HoRus-Start est définitivement limité aux **Étapes 0 à 5**. Le pipeline se termine après l'exécution de l'Étape 5 (Asset Preparation & Validation). La création manuelle de modèles Golden, le déploiement via Terraform et l'installation d'applications s'effectuent en dehors de HoRus-Start.
+> 🔒 **Avis de gel d'architecture (v2.0-RC1)**: Le pipeline HoRus-Start est définitivement limité aux **Étapes 0 à 5**. Le pipeline se termine après l'exécution de l'Étape 5 (Asset Preparation & Validation). La création manuelle de modèles Golden, le déploiement via Terraform et l'installation d'applications s'effectuent en dehors de HoRus-Start. Les instructions détaillées étape par étape pour la création manuelle des modèles Golden (VM ID 9000 Base, VM ID 9001 Docker, modèles LXC et standards SRE) sont documentées dans [docs/golden-images/](./docs/golden-images/).
 
 ---
 
@@ -76,6 +76,7 @@ HoRus-Start/
 ├── docs/                    # Documentation d'architecture, d'exploitation et de sécurité
 │   ├── architecture/        # Spécifications du modèle de domaine, du planificateur et de l'API Runtime
 │   ├── getting-started/     # Installation, Démarrage rapide, Prérequis
+│   ├── golden-images/       # Documentation complète des modèles Golden VM et LXC
 │   ├── operations/          # Dépannage, Récupération, Sauvegarde & Restauration
 │   └── security/            # Modèle de sécurité, Gestion des secrets, Modèle de menace
 ├── inventory/               # Définitions de l'inventaire Ansible (hosts.yml)

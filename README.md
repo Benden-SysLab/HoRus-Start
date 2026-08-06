@@ -8,7 +8,7 @@
 
 **HoRus-Start v2** is an enterprise-grade Infrastructure-as-Code (IaC) automation framework designed for bootstrapping bare-metal Proxmox VE hypervisor clusters. Built upon declarative principles, modular Ansible roles, and versioned JSON Runtime APIs (v1), HoRus-Start provides deterministic automation from bare-metal network readiness to distributed storage reconciliation and OS asset publication.
 
-> 🔒 **Architecture Freeze Notice (v2.0-RC1)**: The HoRus-Start pipeline is frozen and permanently limited to **Stages 0 through 5**. The pipeline finishes upon completing Stage 5 (Asset Preparation & Validation). Manual Golden Template creation, Terraform provisioning, and application deployments operate outside HoRus-Start.
+> 🔒 **Architecture Freeze Notice (v2.0-RC1)**: The HoRus-Start pipeline is frozen and permanently limited to **Stages 0 through 5**. The pipeline finishes upon completing Stage 5 (Asset Preparation & Validation). Manual Golden Template creation, Terraform provisioning, and application deployments operate outside HoRus-Start. Step-by-step instructions for manual Golden Template creation (VM ID 9000 Base, VM ID 9001 Docker, LXC templates, and SRE standards) are documented in [docs/golden-images/](./docs/golden-images/).
 
 ---
 
@@ -76,6 +76,7 @@ HoRus-Start/
 ├── docs/                    # Architecture, Getting Started, Operations & Security docs
 │   ├── architecture/        # Domain model, planner spec, runtime API specifications
 │   ├── getting-started/     # Installation, Quickstart, Requirements
+│   ├── golden-images/       # Golden VM & LXC templates documentation suite
 │   ├── operations/          # Troubleshooting, Recovery, Backup & Restore
 │   └── security/            # Security Model, Secrets Management, Threat Model
 ├── inventory/               # Ansible inventory definitions (hosts.yml)
