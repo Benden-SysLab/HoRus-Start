@@ -19,7 +19,12 @@
     fail_msg: "CRITICAL SAFETY VIOLATION: Target storage device {{ item.device }} or mount {{ item.mount_point }} conflicts with System OS Disk on {{ inventory_hostname }}!"
     success_msg: "✔ Device {{ item.device }} confirmed non-system disk on {{ inventory_hostname }}."
   loop: "{{ node_storage_targets | default([]) }}"
-  when: node_storage_targets is defined and node_storage_targets | length > 0
+  when:
+    - node_storage_targets is defined
+    - node_storage_targets | length > 0
+    - item.device is defined
+    - item.device != ''
+    - (item.driver | default(item.type | default('dir')) | lower | trim) != 'nfs' or inventory_hostname == storage_nfs_backend_host
   tags: ['stage3', 'validation', 'verify', 'reconcile']
 
 - name: "3.3.3 [Validation] Check physical device or by-id existence on node"
@@ -27,7 +32,12 @@
     path: "{{ item.device }}"
   register: target_dev_stats
   loop: "{{ node_storage_targets | default([]) }}"
-  when: node_storage_targets is defined and node_storage_targets | length > 0
+  when:
+    - node_storage_targets is defined
+    - node_storage_targets | length > 0
+    - item.device is defined
+    - item.device != ''
+    - (item.driver | default(item.type | default('dir')) | lower | trim) != 'nfs' or inventory_hostname == storage_nfs_backend_host
   tags: ['stage3', 'validation', 'verify', 'reconcile']
 
 - name: "3.3.4 [Reconciliation] Inspect runtime filesystem signatures via blkid"
@@ -36,7 +46,12 @@
   changed_when: false
   failed_when: false
   loop: "{{ node_storage_targets | default([]) }}"
-  when: node_storage_targets is defined and node_storage_targets | length > 0
+  when:
+    - node_storage_targets is defined
+    - node_storage_targets | length > 0
+    - item.device is defined
+    - item.device != ''
+    - (item.driver | default(item.type | default('dir')) | lower | trim) != 'nfs' or inventory_hostname == storage_nfs_backend_host
   tags: ['stage3', 'validation', 'reconcile']
 
 - name: "3.3.5 [Reconciliation] Inspect runtime active device mount status via findmnt"
@@ -45,7 +60,12 @@
   changed_when: false
   failed_when: false
   loop: "{{ node_storage_targets | default([]) }}"
-  when: node_storage_targets is defined and node_storage_targets | length > 0
+  when:
+    - node_storage_targets is defined
+    - node_storage_targets | length > 0
+    - item.device is defined
+    - item.device != ''
+    - (item.driver | default(item.type | default('dir')) | lower | trim) != 'nfs' or inventory_hostname == storage_nfs_backend_host
   tags: ['stage3', 'validation', 'reconcile']
 
 - name: "3.3.6 [Reconciliation] Check open file descriptors on device if mounted via fuser"
@@ -54,7 +74,12 @@
   changed_when: false
   failed_when: false
   loop: "{{ node_storage_targets | default([]) }}"
-  when: node_storage_targets is defined and node_storage_targets | length > 0
+  when:
+    - node_storage_targets is defined
+    - node_storage_targets | length > 0
+    - item.device is defined
+    - item.device != ''
+    - (item.driver | default(item.type | default('dir')) | lower | trim) != 'nfs' or inventory_hostname == storage_nfs_backend_host
   tags: ['stage3', 'validation', 'reconcile']
 
 - name: "3.3.7 [Reconciliation] Inspect runtime Proxmox VE storage status via pvesm status"
@@ -66,114 +91,17 @@
 
 - name: "3.3.8 [Reconciliation] Compute granular action decision flags (Reconciliation Engine)"
   ansible.builtin.set_fact:
-    node_reconciled_targets: "{{ reconciled_list_builder | from_json }}"
-  vars:
-    reconciled_list_builder: >-
-      {%- set rec_list = [] -%}
-      {%- set blkid_res = target_dev_blkid.results | default([]) -%}
-      {%- set findmnt_res = target_dev_findmnt.results | default([]) -%}
-      {%- set fuser_res = target_dev_fuser.results | default([]) -%}
-      {%- set pve_stdout = target_dev_pvesm.stdout | default('') -%}
-      {%- set pve_storage_ids_list = (node_pve_storage_ids if (node_pve_storage_ids is defined and node_pve_storage_ids | length > 0) else (pve_stdout.splitlines() | map('trim') | map('regex_replace', '^([a-zA-Z0-9_\\-]+)\\s+.*', '\\1') | list)) -%}
-      {%- set active_swap_str = (active_swaps | default([])) | join(' ') -%}
-      {%- set lvm_pv_str = (lvm_pvs | default([])) | join(' ') -%}
-      {%- set zpool_str = (zpool_status_raw.stdout | default('')) -%}
-      {%- set ceph_str = (ceph_volumes_raw.stdout | default('')) -%}
-      {%- for item in node_storage_targets | default([]) -%}
-        {%- set idx = loop.index0 -%}
-        {%- set blk_out = (blkid_res[idx].stdout | default('')) if (idx < blkid_res | length) else '' -%}
-        {%- set blk_type = '' -%}
-        {%- set blk_uuid = '' -%}
-        {%- for l in blk_out.splitlines() -%}
-          {%- if l.startswith('TYPE=') -%}{%- set blk_type = l.split('=',1)[1] -%}{%- endif -%}
-          {%- if l.startswith('UUID=') -%}{%- set blk_uuid = l.split('=',1)[1] -%}{%- endif -%}
-        {%- endfor -%}
-        {%- set mnt_path = (findmnt_res[idx].stdout | default('') | trim) if (idx < findmnt_res | length) else '' -%}
-        {%- set fuser_out = (fuser_res[idx].stdout | default('') | trim) if (idx < fuser_res | length) else '' -%}
-        
-        {%- set is_os = (item.device == ('/dev/' ~ os_disk_name)) -%}
-        {%- set is_swap = (item.device in active_swap_str) -%}
-        {%- set is_lvm = (item.device in lvm_pv_str) -%}
-        {%- set is_zpool = (item.device in zpool_str) -%}
-        {%- set is_ceph = (item.device in ceph_str) -%}
-        {%- set has_open_handles = (fuser_out != '') -%}
-        
-        {%- set desired_state = item.state | default('present') | lower | trim -%}
-        {%- set desired_fs = item.fstype | default('ext4') -%}
-        {%- set desired_mount = item.mount_point -%}
-        {%- set desired_driver = item.driver | default(item.type | default('dir')) | lower | trim -%}
-        {%- set desired_shared = item.shared | default(false) | bool -%}
-        {%- set operator_allowed_fmt = item.force_format | default(false) | bool -%}
-        
-        {%- set fs_exists = (blk_type != '') -%}
-        {%- set fs_matches = (blk_type == desired_fs) -%}
-        {%- set is_mnt = (mnt_path != '') -%}
-        {%- set mnt_matches = (mnt_path == desired_mount) -%}
-        {%- set mnt_unexpected = is_mnt and (not mnt_matches) -%}
-        {%- set is_pve_reg = (item.name in pve_storage_ids_list) -%}
-        
-        {%- set pve_st_list = (node_pve_storages | default([])) -%}
-        {%- set st_obj_list = pve_st_list | selectattr('storage_id', 'defined') | selectattr('storage_id', 'equalto', item.name) | list -%}
-        {%- set st_obj = st_obj_list | first if (st_obj_list | length > 0) else none -%}
-        {%- set st_nodes = (st_obj.nodes | default('')) if st_obj is not none else '' -%}
-        {%- set st_shared = (st_obj.shared | default(false)) if st_obj is not none else false -%}
-        {%- set scoping_matches = (st_obj is not none) and ((desired_shared and st_shared) or ((not desired_shared) and (not st_shared) and (inventory_hostname in st_nodes.split(',') or st_nodes == '' or st_nodes == inventory_hostname))) -%}
-        
-        {%- set safe_fmt = (not is_os) and (not is_swap) and (not is_lvm) and (not is_zpool) and (not is_ceph) and (desired_mount not in ['/', '/boot', '/etc/pve', '/var', '/usr']) -%}
-        {%- set safe_rm = (not is_os) and (not is_swap) and (not is_lvm) and (not is_zpool) and (not is_ceph) -%}
-        
-        {%- set needs_rm = (desired_state == 'absent') and (is_pve_reg or is_mnt or fs_exists) -%}
-        {%- set needs_pve_rm = is_pve_reg and ((desired_state == 'absent') or operator_allowed_fmt) -%}
-        {%- set needs_umnt = is_mnt and ((desired_state == 'absent') or mnt_unexpected or (operator_allowed_fmt and safe_fmt)) -%}
-        {%- set needs_wipe_rm = (desired_state == 'absent') and operator_allowed_fmt and safe_fmt -%}
-        
-        {%- set needs_fmt_cond = (desired_state == 'present') and ((not fs_exists) or operator_allowed_fmt or (not fs_matches)) -%}
-        {%- set needs_fmt = needs_fmt_cond and safe_fmt and operator_allowed_fmt -%}
-        
-        {%- set needs_mk_dir = (desired_state == 'present') -%}
-        {%- set needs_sysd_mnt = (desired_state == 'present') -%}
-        {%- set needs_fstb = (desired_state == 'present') -%}
-        {%- set needs_mnt_act = (desired_state == 'present') and ((not is_mnt) or (not mnt_matches) or needs_fmt or needs_umnt) -%}
-        {%- set needs_pve_add = (desired_state == 'present') and ((not is_pve_reg) or needs_pve_rm) -%}
-        {%- set needs_pve_conv = (desired_state == 'present') and is_pve_reg and (not needs_pve_rm) and (not scoping_matches) -%}
-        {%- set needs_reload = (desired_state == 'present') -%}
-        
-        {%- set active_uuid = blk_uuid if blk_uuid != '' else (item.uuid | default('none')) -%}
-        
-        {%- set rec_item = item | combine({
-          'driver': desired_driver,
-          'type': desired_driver,
-          'state': desired_state,
-          'uuid': active_uuid,
-          'current_fstype': blk_type if blk_type != '' else 'none',
-          'current_uuid': blk_uuid if blk_uuid != '' else 'none',
-          'current_mount_point': mnt_path if mnt_path != '' else 'none',
-          'filesystem_exists': fs_exists,
-          'filesystem_matches': fs_matches,
-          'mounted': is_mnt,
-          'mount_matches': mnt_matches,
-          'mount_unexpected': mnt_unexpected,
-          'has_open_file_handles': has_open_handles,
-          'registered_in_proxmox': is_pve_reg,
-          'safe_to_format': safe_fmt,
-          'safe_to_remove': safe_rm,
-          'operator_allowed_format': operator_allowed_fmt,
-          'needs_removal': needs_rm,
-          'needs_pvesm_remove': needs_pve_rm,
-          'needs_umount': needs_umnt,
-          'needs_wipe_on_remove': needs_wipe_rm,
-          'needs_format': needs_fmt,
-          'needs_mkdir': needs_mk_dir,
-          'needs_systemd_mount': needs_sysd_mnt,
-          'needs_fstab': needs_fstb,
-          'needs_mount': needs_mnt_act,
-          'needs_pvesm_add': needs_pve_add,
-          'needs_conversion': needs_pve_conv,
-          'needs_reload_daemon': needs_reload
-        }) -%}
-        {%- set _ = rec_list.append(rec_item) -%}
-      {%- endfor -%}
-      {{ rec_list | to_json }}
+    node_reconciled_targets: []
+  when: node_storage_targets is defined and node_storage_targets | length > 0
+  tags: ['stage3', 'validation', 'reconcile']
+
+- name: "3.3.8a [Reconciliation] Build action decisions per storage target"
+  ansible.builtin.include_tasks: reconcile_target.yml
+  loop: "{{ node_storage_targets | default([]) }}"
+  loop_control:
+    loop_var: reconcile_target
+    index_var: reconcile_target_index
+    label: "{{ reconcile_target.name | default('unnamed-storage') }}"
   when: node_storage_targets is defined and node_storage_targets | length > 0
   tags: ['stage3', 'validation', 'reconcile']
 
@@ -233,6 +161,7 @@
       - "Storage Name: {{ item.name }}"
       - "Target Device: {{ item.device }} (UUID: {{ item.uuid | default('N/A') }})"
       - "Current State: Mounted ({{ item.mounted }}), Registered ({{ item.registered_in_proxmox }}), FS ({{ item.current_fstype }})"
+      - "Current Proxmox Type: {{ item.current_proxmox_type }} (matches desired: {{ item.proxmox_type_matches }})"
       - "Desired State: {{ item.state | upper }} (Driver: {{ item.driver }}, Shared: {{ item.shared }}, Mount: {{ item.mount_point }})"
       - "Reconciliation Decisions & Planned Execution Actions:"
       - "  - Remove Proxmox Storage (needs_pvesm_remove): {{ item.needs_pvesm_remove }}"
@@ -244,6 +173,7 @@
       - "  - Update /etc/fstab (needs_fstab): {{ item.needs_fstab }}"
       - "  - Mount Storage Volume (needs_mount): {{ item.needs_mount }}"
       - "  - Register Proxmox Storage (needs_pvesm_add): {{ item.needs_pvesm_add }}"
+      - "  - Replace mismatched Proxmox backend (remove then add): {{ item.needs_backend_replacement }}"
       - "  - Update Proxmox Storage Scoping (needs_conversion): {{ item.needs_conversion }}"
       - "=========================================================================="
   loop: "{{ node_reconciled_targets | default([]) }}"

@@ -1,0 +1,6 @@
+---
+# Handlers for storage_prepare role
+
+- name: apply nfs exports
+  ansible.builtin.command: exportfs -ra
+  failed_when: false

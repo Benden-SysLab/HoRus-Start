@@ -4,3 +4,6 @@ storage_node_mappings: {}
 storage_plan_only: false
 force_wizard: false
 non_interactive: false
+# The NAS node is the only host allowed to prepare physical filesystem backends
+# for NFS storages. All other nodes consume them through the Proxmox NFS driver.
+storage_nfs_backend_host: horus-pmx-node03

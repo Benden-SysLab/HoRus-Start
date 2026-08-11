@@ -10,18 +10,42 @@
   ansible.builtin.set_fact:
     active_present_targets: "{{ (node_storage_targets | default([])) | selectattr('state', 'undefined') | list + (node_storage_targets | default([])) | selectattr('state', 'defined') | selectattr('state', 'equalto', 'present') | list }}"
     active_absent_targets: "{{ (node_storage_targets | default([])) | selectattr('state', 'defined') | selectattr('state', 'equalto', 'absent') | list }}"
+    local_mount_verify_targets: "{{ local_mount_verify_targets_builder | from_json }}"
+  vars:
+    local_mount_verify_targets_builder: >-
+      {%- set targets = [] -%}
+      {%- for storage in ((node_storage_targets | default([])) | selectattr('state', 'undefined') | list + (node_storage_targets | default([])) | selectattr('state', 'defined') | selectattr('state', 'equalto', 'present') | list) -%}
+        {%- set driver = storage.driver | default(storage.type | default('dir')) | lower | trim -%}
+        {%- if driver != 'nfs' or inventory_hostname == storage_nfs_backend_host -%}
+          {%- set _ = targets.append(storage) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ targets | to_json }}
   tags: ['stage3', 'verification', 'verify']
 
-- name: "3.5.3 [Verification] Verify active mount point status via findmnt"
+- name: "3.5.3 [Verification] Assert NFS Proxmox registrations have the desired backend type"
+  ansible.builtin.assert:
+    that:
+      - "(pvesm_verify_status.stdout | regex_search('(?m)^' ~ (item.name | regex_escape) ~ '\\s+nfs\\s+')) is not none"
+    fail_msg: "CRITICAL: Storage {{ item.name }} must be registered as Proxmox nfs, but pvesm status reports another type or no registration on {{ inventory_hostname }}."
+    success_msg: "✔ Storage {{ item.name }} is registered as Proxmox nfs on {{ inventory_hostname }}."
+  loop: "{{ active_present_targets }}"
+  when:
+    - not (cancel_provisioning | default(false) | bool)
+    - (item.driver | default(item.type | default('dir')) | lower | trim) == 'nfs'
+    - item.nodes | default([]) | length == 0 or inventory_hostname in (item.nodes | default([]))
+  tags: ['stage3', 'verification', 'verify']
+
+- name: "3.5.4 [Verification] Verify local backend mount point status via findmnt"
   ansible.builtin.command: "findmnt {{ item.mount_point }}"
   register: mount_verify_raw
   changed_when: false
   failed_when: false
-  loop: "{{ active_present_targets }}"
-  when: active_present_targets | length > 0
+  loop: "{{ local_mount_verify_targets }}"
+  when: local_mount_verify_targets | length > 0
   tags: ['stage3', 'verification', 'verify']
 
-- name: "3.5.4 [Verification] Assert target mount points are active if not dry-run"
+- name: "3.5.5 [Verification] Assert local backend mount points are active if not dry-run"
   ansible.builtin.assert:
     that:
       - "item.rc == 0"
@@ -30,7 +54,7 @@
   loop: "{{ mount_verify_raw.results | default([]) }}"
   when:
     - not (cancel_provisioning | default(false) | bool)
-    - active_present_targets | length > 0
+    - local_mount_verify_targets | length > 0
     - item.rc is defined
   tags: ['stage3', 'verification', 'verify']
 

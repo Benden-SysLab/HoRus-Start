@@ -12,6 +12,7 @@
 
 - name: "Stage 3 | Storage Discovery & Provisioning for Proxmox VE Nodes"
   hosts: proxmox_nodes:proxmox:all
+  any_errors_fatal: true
   gather_facts: true
   become: true
   vars_files:

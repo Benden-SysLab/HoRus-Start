@@ -14,7 +14,6 @@
       when:
         - not (cancel_provisioning | default(false) | bool)
         - item.needs_pvesm_remove | bool
-      failed_when: false
       tags: ['stage3', 'provision']
 
     - name: "3.4.2 [Provisioning - Unmount] Stop and disable systemd mount unit"
@@ -87,6 +86,75 @@
       when:
         - not (cancel_provisioning | default(false) | bool)
         - item.needs_mkdir | bool
+        - item.device is defined and item.device != ''
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.7b [Provisioning - Content Dirs] Ensure Proxmox content directories exist on storage host"
+      ansible.builtin.file:
+        path: "{{ item.0.mount_point }}/{{ item.1 }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      loop: "{{ node_reconciled_targets | default([]) | product(['images', 'template/iso', 'template/cache', 'dump', 'snippets']) | list }}"
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - item.0.device is defined and item.0.device != ''
+      failed_when: false
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.7c [Provisioning - NAS] Install NFS server package on storage node"
+      ansible.builtin.package:
+        name: nfs-kernel-server
+        state: present
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - inventory_hostname == 'horus-pmx-node03'
+      failed_when: false
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.7d [Provisioning - NAS] Ensure exports.d directory exists"
+      ansible.builtin.file:
+        path: /etc/exports.d
+        state: directory
+        mode: '0755'
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - inventory_hostname == 'horus-pmx-node03'
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.7e [Provisioning - NAS] Configure NFS exports for shared storages"
+      ansible.builtin.copy:
+        dest: /etc/exports.d/horus-storages.exports
+        mode: '0644'
+        content: |
+          /mnt/pve/storage 192.168.1.0/24(rw,async,no_subtree_check,no_root_squash)
+          /mnt/pve/storage-media 192.168.1.210(rw,async,no_subtree_check,no_root_squash) 192.168.1.220(rw,async,no_subtree_check,no_root_squash)
+          /mnt/pve/storage-work 192.168.1.0/24(rw,async,no_subtree_check,no_root_squash)
+          /mnt/pve/storage-infra 192.168.1.0/24(rw,async,no_subtree_check,no_root_squash)
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - inventory_hostname == 'horus-pmx-node03'
+      notify: apply nfs exports
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.7f [Provisioning - NAS] Ensure NFS server service is started and enabled"
+      ansible.builtin.systemd:
+        name: nfs-server
+        state: started
+        enabled: true
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - inventory_hostname == 'horus-pmx-node03'
+      failed_when: false
+      tags: ['stage3', 'provision']
+
+    - name: "3.4.7g [Provisioning - NAS] Apply NFS exports"
+      ansible.builtin.command: exportfs -ra
+      when:
+        - not (cancel_provisioning | default(false) | bool)
+        - inventory_hostname == 'horus-pmx-node03'
+      failed_when: false
       tags: ['stage3', 'provision']
 
     - name: "3.4.8 [Provisioning - Mount] Extract primary filesystem UUID of target storage devices"
@@ -97,6 +165,7 @@
       loop: "{{ node_reconciled_targets | default([]) }}"
       when:
         - not (cancel_provisioning | default(false) | bool)
+        - item.device is defined and item.device != ''
         - item.needs_systemd_mount | bool or item.needs_mount | bool
       tags: ['stage3', 'provision']
 
@@ -123,6 +192,7 @@
         - not (cancel_provisioning | default(false) | bool)
         - item.item is defined
         - item.item.needs_systemd_mount | bool
+        - item.item.device is defined and item.item.device != ''
       tags: ['stage3', 'provision']
 
     - name: "3.4.10 [Provisioning - Mount] Enable and start PVE Systemd Mount Unit"
@@ -136,6 +206,7 @@
         - not (cancel_provisioning | default(false) | bool)
         - item.item is defined
         - item.item.needs_mount | bool
+        - item.item.device is defined and item.item.device != ''
       tags: ['stage3', 'provision']
 
     - name: "3.4.11 [Provisioning - Mount] Mount storage devices and persist UUID entries in /etc/fstab"
@@ -150,6 +221,7 @@
         - not (cancel_provisioning | default(false) | bool)
         - item.item is defined
         - item.item.needs_fstab | bool
+        - item.item.device is defined and item.item.device != ''
       tags: ['stage3', 'provision']
 
     # --------------------------------------------------------------------------
@@ -157,10 +229,19 @@
     # --------------------------------------------------------------------------
     - name: "3.4.12 [Provisioning - PVE Register] Register storages in Proxmox VE (pvesm add)"
       ansible.builtin.command: >
+        {% if (item.driver | default(item.type | default('dir'))) == 'nfs' %}
+        pvesm add nfs {{ item.name }}
+        --server {{ item.server | default('192.168.1.230') }}
+        --export {{ item.export_path | default(item.mount_point) }}
+        --path /mnt/pve/.horus-nfs/{{ item.name }}
+        --content {{ (item.content | default(['images', 'rootdir'])) | join(',') }}
+        {% if item.nodes is defined and item.nodes | length > 0 and item.nodes | length < ansible_play_hosts | length %}--nodes {{ item.nodes | join(',') }}{% endif %}
+        {% else %}
         pvesm add {{ item.driver | default(item.type | default('dir')) }} {{ item.name }}
         --path {{ item.mount_point }}
         {% if item.shared | default(false) | bool %}--shared 1{% else %}--nodes {{ inventory_hostname }} --shared 0{% endif %}
         --content {{ (item.content | default(['images', 'rootdir'])) | join(',') }}
+        {% endif %}
       loop: "{{ node_reconciled_targets | default([]) }}"
       when:
         - not (cancel_provisioning | default(false) | bool)
@@ -169,8 +250,18 @@
 
     - name: "3.4.13 [Provisioning - PVE Scoping] Update Proxmox storage access scoping (pvesm set)"
       ansible.builtin.command: >
+        {% if (item.driver | default(item.type | default('dir'))) == 'nfs' %}
+        pvesm set {{ item.name }}
+        --server {{ item.server | default('192.168.1.230') }}
+        --export {{ item.export_path | default(item.mount_point) }}
+        --path /mnt/pve/.horus-nfs/{{ item.name }}
+        --content {{ (item.content | default(['images', 'rootdir'])) | join(',') }}
+        --shared 1
+        {% if item.nodes is defined and item.nodes | length > 0 and item.nodes | length < ansible_play_hosts | length %}--nodes {{ item.nodes | join(',') }}{% else %}--delete nodes{% endif %}
+        {% else %}
         pvesm set {{ item.name }}
         {% if item.shared | default(false) | bool %}--shared 1{% else %}--nodes {{ inventory_hostname }} --shared 0{% endif %}
+        {% endif %}
       loop: "{{ node_reconciled_targets | default([]) }}"
       when:
         - not (cancel_provisioning | default(false) | bool)

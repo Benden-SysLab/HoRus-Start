@@ -1,0 +1,97 @@
+---
+# One target is reconciled through ordinary task variables/facts. This avoids
+# embedding Jinja block statements inside a scalar consumed by from_json.
+
+- name: "3.3.8a.1 [Reconciliation] Read target runtime observations"
+  ansible.builtin.set_fact:
+    reconcile_blkid_result: "{{ (target_dev_blkid.results | default([]))[reconcile_target_index] | default({}) }}"
+    reconcile_findmnt_result: "{{ (target_dev_findmnt.results | default([]))[reconcile_target_index] | default({}) }}"
+    reconcile_fuser_result: "{{ (target_dev_fuser.results | default([]))[reconcile_target_index] | default({}) }}"
+    reconcile_pve_storage_ids: "{{ node_pve_storage_ids if (node_pve_storage_ids is defined and node_pve_storage_ids | length > 0) else ((target_dev_pvesm.stdout | default('')).splitlines() | map('trim') | map('regex_replace', '^([a-zA-Z0-9_\\-]+)\\s+.*', '\\1') | list) }}"
+    reconcile_pve_storage_matches: "{{ (node_pve_storages | default([])) | selectattr('storage_id', 'defined') | selectattr('storage_id', 'equalto', reconcile_target.name) | list }}"
+
+- name: "3.3.8a.2 [Reconciliation] Normalize target desired and runtime state"
+  ansible.builtin.set_fact:
+    reconcile_blkid_stdout: "{{ reconcile_blkid_result.stdout | default('') }}"
+    reconcile_mount_path: "{{ reconcile_findmnt_result.stdout | default('') | trim }}"
+    reconcile_fuser_output: "{{ reconcile_fuser_result.stdout | default('') | trim }}"
+    reconcile_desired_state: "{{ reconcile_target.state | default('present') | lower | trim }}"
+    reconcile_desired_fs: "{{ reconcile_target.fstype | default('ext4') }}"
+    reconcile_desired_mount: "{{ reconcile_target.mount_point }}"
+    reconcile_desired_driver: "{{ reconcile_target.driver | default(reconcile_target.type | default('dir')) | lower | trim }}"
+    reconcile_desired_shared: "{{ reconcile_target.shared | default(false) | bool }}"
+    reconcile_operator_allowed_format: "{{ reconcile_target.force_format | default(false) | bool }}"
+    reconcile_configured_device: "{{ reconcile_target.device is defined and reconcile_target.device != '' }}"
+
+- name: "3.3.8a.3 [Reconciliation] Derive target backend and Proxmox registration state"
+  ansible.builtin.set_fact:
+    reconcile_current_fstype: "{{ (reconcile_blkid_stdout | regex_findall('(?m)^TYPE=(.+)$') | first) | default('') }}"
+    reconcile_current_uuid: "{{ (reconcile_blkid_stdout | regex_findall('(?m)^UUID=(.+)$') | first) | default('') }}"
+    reconcile_is_nfs: "{{ reconcile_desired_driver == 'nfs' }}"
+    reconcile_pve_storage: "{{ reconcile_pve_storage_matches | first | default({}) }}"
+    reconcile_registered_in_proxmox: "{{ reconcile_target.name in reconcile_pve_storage_ids }}"
+
+- name: "3.3.8a.4 [Reconciliation] Derive safety, scope, and backend comparison flags"
+  ansible.builtin.set_fact:
+    reconcile_manages_local_backend: "{{ (not (reconcile_is_nfs | bool)) or inventory_hostname == storage_nfs_backend_host }}"
+    reconcile_current_proxmox_type: "{{ reconcile_pve_storage.backend | default('') }}"
+    reconcile_pve_nodes: "{{ reconcile_pve_storage.nodes | default('') }}"
+    reconcile_pve_shared: "{{ (reconcile_pve_storage.shared | default(false) | bool) or reconcile_pve_storage.backend | default('') == 'nfs' }}"
+    reconcile_desired_nodes: "{{ reconcile_target.nodes | default([]) }}"
+
+- name: "3.3.8a.5 [Reconciliation] Derive execution flags"
+  ansible.builtin.set_fact:
+    reconcile_has_device: "{{ (reconcile_configured_device | bool) and (reconcile_manages_local_backend | bool) }}"
+    reconcile_pve_reconcile_owner: "{{ (not (reconcile_is_nfs | bool)) or inventory_hostname == storage_nfs_backend_host }}"
+    reconcile_proxmox_type_matches: "{{ reconcile_pve_storage | length > 0 and reconcile_current_proxmox_type == reconcile_desired_driver }}"
+    reconcile_cluster_scope_expected: "{{ (reconcile_desired_nodes | length == 0) or (reconcile_desired_nodes | length >= ansible_play_hosts | length) }}"
+
+- name: "3.3.8a.6 [Reconciliation] Compute final reconciliation decision flags"
+  ansible.builtin.set_fact:
+    reconcile_filesystem_exists: "{{ (reconcile_current_fstype != '') if (reconcile_has_device | bool) else true }}"
+    reconcile_filesystem_matches: "{{ (reconcile_current_fstype == reconcile_desired_fs) if (reconcile_has_device | bool) else true }}"
+    reconcile_mounted: "{{ (reconcile_mount_path != '') if (reconcile_has_device | bool) else true }}"
+    reconcile_mount_matches: "{{ (reconcile_mount_path == reconcile_desired_mount) if (reconcile_has_device | bool) else true }}"
+    reconcile_safe_to_format: "{{ (not (reconcile_has_device | bool)) or ((reconcile_target.device != '/dev/' ~ os_disk_name) and (reconcile_target.device not in (active_swaps | default([]) | join(' '))) and (reconcile_target.device not in (lvm_pvs | default([]) | join(' '))) and (reconcile_target.device not in (zpool_status_raw.stdout | default(''))) and (reconcile_target.device not in (ceph_volumes_raw.stdout | default(''))) and (reconcile_desired_mount not in ['/', '/boot', '/etc/pve', '/var', '/usr'])) }}"
+    reconcile_safe_to_remove: "{{ (not (reconcile_has_device | bool)) or ((reconcile_target.device != '/dev/' ~ os_disk_name) and (reconcile_target.device not in (active_swaps | default([]) | join(' '))) and (reconcile_target.device not in (lvm_pvs | default([]) | join(' '))) and (reconcile_target.device not in (zpool_status_raw.stdout | default(''))) and (reconcile_target.device not in (ceph_volumes_raw.stdout | default('')))) }}"
+    reconcile_nfs_nodes_match: "{{ (reconcile_pve_nodes == '') if (reconcile_cluster_scope_expected | bool) else ((reconcile_pve_nodes.split(',') | sort) == (reconcile_desired_nodes | sort)) }}"
+
+- name: "3.3.8a.7 [Reconciliation] Append target action plan"
+  ansible.builtin.set_fact:
+    node_reconciled_targets: >-
+      {{ (node_reconciled_targets | default([])) + [reconcile_target | combine({
+        'driver': reconcile_desired_driver,
+        'type': reconcile_desired_driver,
+        'state': reconcile_desired_state,
+        'uuid': reconcile_current_uuid if reconcile_current_uuid != '' else (reconcile_target.uuid | default('none')),
+        'current_fstype': reconcile_current_fstype if reconcile_current_fstype != '' else 'none',
+        'current_uuid': reconcile_current_uuid if reconcile_current_uuid != '' else 'none',
+        'current_mount_point': reconcile_mount_path if reconcile_mount_path != '' else 'none',
+        'filesystem_exists': reconcile_filesystem_exists | bool,
+        'filesystem_matches': reconcile_filesystem_matches | bool,
+        'mounted': reconcile_mounted | bool,
+        'mount_matches': reconcile_mount_matches | bool,
+        'mount_unexpected': (reconcile_mounted | bool) and not (reconcile_mount_matches | bool),
+        'has_open_file_handles': (reconcile_fuser_output != '') if (reconcile_has_device | bool) else false,
+        'registered_in_proxmox': reconcile_registered_in_proxmox | bool,
+        'current_proxmox_type': reconcile_current_proxmox_type if reconcile_current_proxmox_type != '' else 'none',
+        'proxmox_type_matches': reconcile_proxmox_type_matches | bool,
+        'manages_local_backend': reconcile_manages_local_backend | bool,
+        'pve_reconcile_owner': reconcile_pve_reconcile_owner | bool,
+        'needs_backend_replacement': (reconcile_is_nfs | bool) and (reconcile_registered_in_proxmox | bool) and not (reconcile_proxmox_type_matches | bool),
+        'safe_to_format': reconcile_safe_to_format | bool,
+        'safe_to_remove': reconcile_safe_to_remove | bool,
+        'operator_allowed_format': reconcile_operator_allowed_format | bool,
+        'needs_removal': reconcile_desired_state == 'absent' and ((reconcile_registered_in_proxmox | bool) or (reconcile_mounted | bool) or (reconcile_filesystem_exists | bool)),
+        'needs_pvesm_remove': (reconcile_pve_reconcile_owner | bool) and (reconcile_registered_in_proxmox | bool) and (reconcile_desired_state == 'absent' or (reconcile_operator_allowed_format | bool) or ((reconcile_is_nfs | bool) and not (reconcile_proxmox_type_matches | bool))),
+        'needs_umount': (reconcile_has_device | bool) and (reconcile_mounted | bool) and (reconcile_desired_state == 'absent' or (not (reconcile_mount_matches | bool)) or ((reconcile_operator_allowed_format | bool) and (reconcile_safe_to_format | bool))),
+        'needs_wipe_on_remove': (reconcile_has_device | bool) and reconcile_desired_state == 'absent' and (reconcile_operator_allowed_format | bool) and (reconcile_safe_to_format | bool),
+        'needs_format': (reconcile_has_device | bool) and reconcile_desired_state == 'present' and ((not (reconcile_filesystem_exists | bool)) or (reconcile_operator_allowed_format | bool) or (not (reconcile_filesystem_matches | bool))) and (reconcile_safe_to_format | bool) and (reconcile_operator_allowed_format | bool),
+        'needs_mkdir': (reconcile_has_device | bool) and reconcile_desired_state == 'present',
+        'needs_systemd_mount': (reconcile_has_device | bool) and reconcile_desired_state == 'present',
+        'needs_fstab': (reconcile_has_device | bool) and reconcile_desired_state == 'present',
+        'needs_mount': (reconcile_has_device | bool) and reconcile_desired_state == 'present' and ((not (reconcile_mounted | bool)) or (not (reconcile_mount_matches | bool)) or ((reconcile_desired_state == 'present') and ((not (reconcile_filesystem_exists | bool)) or (reconcile_operator_allowed_format | bool) or (not (reconcile_filesystem_matches | bool))) and (reconcile_safe_to_format | bool) and (reconcile_operator_allowed_format | bool)) or ((reconcile_mounted | bool) and (reconcile_desired_state == 'absent' or (not (reconcile_mount_matches | bool)) or ((reconcile_operator_allowed_format | bool) and (reconcile_safe_to_format | bool))))),
+        'needs_pvesm_add': (reconcile_pve_reconcile_owner | bool) and reconcile_desired_state == 'present' and ((not (reconcile_registered_in_proxmox | bool)) or ((reconcile_is_nfs | bool) and not (reconcile_proxmox_type_matches | bool))),
+        'needs_conversion': (reconcile_pve_reconcile_owner | bool) and reconcile_desired_state == 'present' and (reconcile_registered_in_proxmox | bool) and (reconcile_proxmox_type_matches | bool) and not (((reconcile_is_nfs | bool) and (reconcile_pve_shared | bool) and (reconcile_nfs_nodes_match | bool)) or ((not (reconcile_is_nfs | bool)) and (((reconcile_desired_shared | bool) and (reconcile_pve_shared | bool)) or ((not (reconcile_desired_shared | bool)) and (not (reconcile_pve_shared | bool)) and (inventory_hostname in reconcile_pve_nodes.split(',') or reconcile_pve_nodes == '' or reconcile_pve_nodes == inventory_hostname))))),
+        'needs_reload_daemon': (reconcile_has_device | bool) and reconcile_desired_state == 'present'
+      })] }}

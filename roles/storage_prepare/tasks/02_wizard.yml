@@ -64,26 +64,49 @@
   ansible.builtin.set_fact:
     node_storage_targets: "{{ normalized_targets_builder | from_json }}"
   vars:
-    raw_targets: >-
+    raw_local_targets: >-
       {{
         (storage_config_vars.storage_nodes[inventory_hostname].storages
           if (not run_interactive_wizard | bool and storage_config_vars is defined and storage_config_vars.storage_nodes is defined and inventory_hostname in storage_config_vars.storage_nodes)
           else (prompted_node_storages | default([])))
       }}
+    raw_shared_list: >-
+      {{
+        (storage_config_vars.shared_storages
+          if (not run_interactive_wizard | bool and storage_config_vars is defined and storage_config_vars.shared_storages is defined)
+          else [])
+      }}
     normalized_targets_builder: >-
       {%- set norm_list = [] -%}
-      {%- for st in raw_targets -%}
+      {%- set local_names = [] -%}
+      {%- for st in raw_local_targets -%}
         {%- set raw_t = st.driver | default(st.type | default('dir')) | lower | trim -%}
         {%- set is_net = (raw_t in ['nfs', 'cifs', 'cephfs', 'pbs', 'rbd']) -%}
-        {%- set is_sh = is_net and ((st.shared | default(false) | bool) or (raw_t == 'shared')) -%}
-        {%- set norm_driver = 'dir' if raw_t in ['dir', 'shared', 'local'] else raw_t -%}
+        {%- set is_sh = is_net or (st.shared | default(false) | bool) -%}
+        {%- set norm_driver = 'dir' if raw_t in ['dir', 'local'] else raw_t -%}
         {%- set norm_state = st.state | default('present') | lower | trim -%}
+        {%- set _ = local_names.append(st.name) -%}
         {%- set _ = norm_list.append(st | combine({
           'driver': norm_driver,
           'type': norm_driver,
           'shared': is_sh,
           'state': norm_state
         })) -%}
+      {%- endfor -%}
+      {%- for sh in raw_shared_list -%}
+        {%- set sh_nodes = sh.nodes | default([]) -%}
+        {%- if (sh_nodes | length == 0 or inventory_hostname in sh_nodes) and (sh.name not in local_names) -%}
+          {%- set raw_t = sh.driver | default(sh.type | default('nfs')) | lower | trim -%}
+          {%- set norm_driver = 'dir' if raw_t in ['dir', 'local'] else raw_t -%}
+          {%- set norm_state = sh.state | default('present') | lower | trim -%}
+          {%- set _ = norm_list.append(sh | combine({
+            'driver': norm_driver,
+            'type': norm_driver,
+            'shared': true,
+            'state': norm_state,
+            'device': sh.device | default('')
+          })) -%}
+        {%- endif -%}
       {%- endfor -%}
       {{ norm_list | to_json }}
   tags: ['stage3', 'wizard']
@@ -98,15 +121,17 @@
       {
       {% for h in ansible_play_hosts %}
         "{{ h }}": {
-          "storages": {{ hostvars[h]['node_storage_targets'] | default([]) | to_json }}
+          "storages": {{ (hostvars[h]['node_storage_targets'] | default([]) | selectattr('device', 'defined') | selectattr('device', 'ne', '')) | list | to_json }}
         }{{ ',' if not loop.last else '' }}
       {% endfor %}
       }
     generated_shared: >-
       {%- set shared_list = [] -%}
+      {%- set seen_names = [] -%}
       {%- for h in ansible_play_hosts -%}
         {%- for st in hostvars[h]['node_storage_targets'] | default([]) -%}
-          {%- if (st.shared | default(false) | bool) or (st.driver | default('dir') in ['nfs', 'cifs', 'cephfs', 'pbs']) -%}
+          {%- if ((st.shared | default(false) | bool) or (st.driver | default('dir') in ['nfs', 'cifs', 'cephfs', 'pbs'])) and (st.name not in seen_names) -%}
+            {%- set _ = seen_names.append(st.name) -%}
             {%- set _ = shared_list.append(st) -%}
           {%- endif -%}
         {%- endfor -%}
