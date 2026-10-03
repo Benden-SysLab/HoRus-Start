@@ -1,6 +1,6 @@
 ---
 # 1.1 Repository Configuration & Standardization Tasks (Trixie Alignment)
-- name: "1.1.1 [Repositories] Remove obsolete or mismatched legacy repository files"
+- name: "1.1.1 [Repositories] Explicitly remove all legacy repository definitions"
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
@@ -8,23 +8,33 @@
     - /etc/apt/sources.list.d/pve-enterprise.list
     - /etc/apt/sources.list.d/pve-enterprise.sources
     - /etc/apt/sources.list.d/pve-no-subscription.list
-    - /etc/apt/sources.list.d/ceph-no-subscription.list
+    - /etc/apt/sources.list.d/pve-no-subscription.sources
     - /etc/apt/sources.list.d/ceph.list
+    - /etc/apt/sources.list.d/ceph.sources
+    - /etc/apt/sources.list.d/ceph-no-subscription.list
+    - /etc/apt/sources.list.d/ceph-no-subscription.sources
+    - /etc/apt/sources.list.d/debian.list
+    - /etc/apt/sources.list.d/debian.sources
 
-- name: "1.1.2 [Repositories] Check for legacy bookworm or bullseye references in /etc/apt/sources.list.d/"
+- name: "1.1.2 [Repositories] Remove legacy files containing obsolete suites or enterprise URLs"
   ansible.builtin.shell: |
-    grep -lE "bookworm|bullseye|enterprise" /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+    grep -lE "bookworm|bullseye|enterprise|ceph" /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
   register: legacy_repo_files
   changed_when: false
 
-- name: "1.1.3 [Repositories] Clean up legacy suite files from /etc/apt/sources.list.d/"
+- name: "1.1.3 [Repositories] Delete discovered legacy repository files"
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop: "{{ legacy_repo_files.stdout_lines }}"
   when: legacy_repo_files.stdout_lines | length > 0
 
-- name: "1.1.4 [Repositories] Configure clean Debian 13 (Trixie) base APT sources"
+- name: "1.1.4 [Repositories] Remove old Debian repository file before replacement"
+  ansible.builtin.file:
+    path: /etc/apt/sources.list
+    state: absent
+
+- name: "1.1.5 [Repositories] Add canonical Debian Trixie repository definitions"
   ansible.builtin.copy:
     dest: /etc/apt/sources.list
     owner: root
@@ -35,7 +45,12 @@
       deb http://deb.debian.org/debian trixie-updates main contrib non-free-firmware
       deb http://security.debian.org/debian-security trixie-security main contrib non-free-firmware
 
-- name: "1.1.5 [Repositories] Enable Proxmox VE Trixie No-Subscription repository"
+- name: "1.1.6 [Repositories] Remove old Proxmox repository file before replacement"
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/proxmox.sources
+    state: absent
+
+- name: "1.1.7 [Repositories] Add canonical Proxmox VE no-subscription repository"
   ansible.builtin.copy:
     dest: /etc/apt/sources.list.d/proxmox.sources
     owner: root
@@ -48,29 +63,24 @@
       Components: pve-no-subscription
       Signed-By: /usr/share/keyrings/proxmox-release-trixie.gpg
 
-- name: "1.1.6 [Repositories] Enable Ceph Squid Trixie No-Subscription repository"
-  ansible.builtin.copy:
-    dest: /etc/apt/sources.list.d/ceph.sources
-    owner: root
-    group: root
-    mode: '0644'
-    content: |
-      Types: deb
-      URIs: http://download.proxmox.com/debian/ceph-squid
-      Suites: trixie
-      Components: no-subscription
-      Signed-By: /usr/share/keyrings/proxmox-release-trixie.gpg
+- name: "1.1.8 [Repositories] Verify only canonical repository files remain"
+  ansible.builtin.shell: |
+    find /etc/apt/sources.list.d -maxdepth 1 -type f -printf '%f\n' | sort
+  register: repository_files
+  changed_when: false
+  failed_when: repository_files.stdout_lines != ['proxmox.sources']
 
-- name: "1.1.7 [Repositories] Fallback PVE No-Subscription list for legacy PVE tooling"
-  ansible.builtin.copy:
-    dest: /etc/apt/sources.list.d/pve-no-subscription.list
-    owner: root
-    group: root
-    mode: '0644'
-    content: |
-      deb http://download.proxmox.com/debian/pve trixie pve-no-subscription
+- name: "1.1.9 [Repositories] Verify canonical repository addresses"
+  ansible.builtin.shell: |
+    grep -hE "^(deb|Types:|URIs:|Suites:|Components:)" /etc/apt/sources.list /etc/apt/sources.list.d/proxmox.sources
+  register: canonical_repository_content
+  changed_when: false
+  failed_when: >-
+    'deb http://deb.debian.org/debian trixie' not in canonical_repository_content.stdout or
+    'URIs: http://download.proxmox.com/debian/pve' not in canonical_repository_content.stdout or
+    'Components: pve-no-subscription' not in canonical_repository_content.stdout
 
-- name: "1.1.8 [Repositories] Remove Proxmox VE Web GUI subscription warning prompt"
+- name: "1.1.10 [Repositories] Remove Proxmox VE Web GUI subscription warning prompt"
   ansible.builtin.replace:
     path: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
     regexp: "Ext\\.Msg\\.show\\(\\{\\s*title: gettext\\('No valid sub"
@@ -78,7 +88,7 @@
   ignore_errors: true
   notify: Restart pveproxy service
 
-- name: "1.1.9 [Repositories] Update apt cache with standardized Trixie repositories"
+- name: "1.1.11 [Repositories] Update apt cache with canonical repositories"
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 0

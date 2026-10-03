@@ -22,8 +22,10 @@
 
 - name: "2.1.5 [Discovery] Determine if node is already part of a cluster"
   ansible.builtin.set_fact:
-    is_in_cluster: "{{ corosync_conf_stat.stat.exists or pve_members_stat.stat.exists or (pvecm_status_raw.rc == 0) }}"
-    is_target_cluster: "{{ (current_cluster_name == (cluster_name | default('HoRus-SysLab'))) or (not corosync_conf_stat.stat.exists and pvecm_status_raw.rc != 0) }}"
+    # /etc/pve/.members also exists on standalone Proxmox installations and
+    # must not be used as proof that corosync clustering is active.
+    is_in_cluster: "{{ corosync_conf_stat.stat.exists or (pvecm_status_raw.rc == 0) }}"
+    is_target_cluster: "{{ current_cluster_name == (cluster_name | default('HoRus-SysLab')) }}"
 
 - name: "2.1.6 [Discovery] Display initial cluster discovery findings"
   ansible.builtin.debug:

@@ -1,5 +1,0 @@
-# Future Services Baseline Definition (config/ - SERVICES PLAN)
-services:
-  telemetry: enabled
-  monitoring: enabled
-  cloud_init: enabled

@@ -1,8 +1,9 @@
-# Example Management Network Topology Configuration (config/network.yml)
 nodes:
-  node01:
+  horus-pmx-node01:
     management_ip: "10.0.0.11"
-  node02:
+  horus-pmx-node02:
     management_ip: "10.0.0.12"
-  node03:
+  horus-pmx-node03:
     management_ip: "10.0.0.13"
+  horus-pmx-node04:
+    management_ip: "10.0.0.14"
