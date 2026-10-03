@@ -1,145 +1,38 @@
-# HoRus-Start — Платформа IaC для автоматизации Proxmox VE (v2.0-RC1)
+# HoRus-Start
 
-🌐 **Языки**: [English](./README.md) | **Русский** | [Українська](./README.uk.md) | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Français](./README.fr.md)
+[English](README.md) · [Русский](README.ru.md) · [Українська](README.uk.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [日本語](README.ja.md)
 
----
+Ansible-проект для первичной настройки четырёх нод Proxmox VE и сборки кластера **HoRus-SysLab**. Рабочий пайплайн настраивает SSH, репозитории APT и базовые пакеты, затем создаёт кластер и проверяет quorum. Проверен на Debian 13 и Proxmox VE 9.2.21.
 
-## 🏛️ Архитектурный обзор и концепция
+| Нода | IP управления | Роль |
+| --- | --- | --- |
+| horus-pmx-node01 | 10.255.0.7 | первая нода кластера |
+| horus-pmx-node02 | 10.255.0.8 | присоединяемая нода |
+| horus-pmx-node03 | 10.255.0.9 | присоединяемая нода |
+| horus-pmx-node04 | 10.255.0.10 | присоединяемая нода |
 
-**HoRus-Start v2** — это промышленный фреймворк автоматизации IaC (Infrastructure-as-Code), предназначенный для развертывания, подготовки и управления кластерами гипервизоров Proxmox VE на bare-metal серверах. Построенный на декларативных принципах, модульных ролях Ansible и версионируемом Runtime API v1 на базе JSON, HoRus-Start обеспечивает полный цикл управления — от первоначальной настройки SSH-связности до распределенных хранилищ и каталога облачных образов.
+## Запуск из WSL Debian
 
-> 🔒 **Заморозка архитектуры (Architecture Freeze v2.0-RC1)**: Пайплайн HoRus-Start заморожен и строго ограничен **Этапами 0–5**. Пайплайн завершает работу после выполнения Этапа 5 (Asset Preparation & Validation). Ручное создание Golden-шаблонов, provisioning через Terraform и развертывание приложений выполняются за пределами HoRus-Start. Пошаговое руководство по ручному созданию золотых образов (VM ID 9000 Base, VM ID 9001 Docker, LXC-шаблонов и SRE-стандартов) задокументировано в [docs/golden-images/](./docs/golden-images/).
+На управляющей машине нужны Python 3 и Ansible. Перед запуском проверьте `inventory/hosts.yml`, `config/network.yml`, `config/cluster.yml`, доступ по SSH, TCP 8006 до первой ноды и связь Corosync между нодами.
 
----
-
-## 🚀 Пайплайн исполнения и этапы системы
-
-HoRus-Start соблюдает строгий 5-шаговый пайплайн на всех этапах:
-
-```
-[ Декларативный конфиг ] ──► 1. Discovery ──► 2. Normalization ──► 3. Planning ──► 4. Provisioning ──► 5. Verification & Reports
-```
-
-### Обзор этапов
-
-| Этап | Название | Описание | Статус |
-| :--- | :--- | :--- | :--- |
-| **Stage 0** | **Infrastructure Readiness Gate** | Проверка готовности среды (Preflight), автосоздание шаблонов учетных данных, поиск дисков и валидация хэшей дистрибутивов (`stage0.json`). | **СТАБИЛЕН** |
-| **Stage 1** | **Bootstrap Connectivity** | Проверка доступности узлов, генерация локальных ed25519 SSH-ключей, развертывание публичных ключей и валидация беспарольного SSH доступа. | **СТАБИЛЕН** |
-| **Stage 2** | **Base System Prep** | Настройка репозиториев APT (Debian 13 Trixie & pve-no-subscription), обновление ядра, установка системных утилит и тюнинг параметров sysctl. | **СТАБИЛЕН** |
-| **Stage 3** | **Proxmox Cluster** | Инициализация кластера `pvecm` quorum на узлах, настройка сети corosync. | **СТАБИЛЕН** |
-| **Stage 4** | **Storage Prepare** | Безопасный поиск физических дисков (`/dev/disk/by-id/`), проверка безопасности системного диска, планирование, форматирование ext4/ZFS и регистрация PVE хранилищ. | **СТАБИЛЕН** |
-| **Stage 5** | **Asset Preparation & Validation** | Загрузка облачных ISO/образов (Ubuntu, Debian, Alpine), драйверов VirtIO, кэша LXC; публикация дистрибутивов в хранилище PVE; проверка хэшей и целостности `qemu-img`. | **СТАБИЛЕН** |
-
-> 🛑 **Остановка пайплайна**: Автоматизация полностью завершается после выполнения Stage 5.
-
----
-
-## 💾 Архитектура подсистемы хранилищ (Stage 4)
-
-Stage 4 предоставляет механизмы безопасного приведения хранилищ к желаемому состоянию:
-
-1. **Discovery**: Сканирует блочные устройства через `lsblk -J` и сопоставляет их со стабильными симлинками `/dev/disk/by-id/` без изменения состояния дисков.
-2. **Защита системного диска**: Проверяет, чтобы целевые диски не пересекались с системным диском ОС (`/`, `/boot`, `/boot/efi`, `/etc/pve`).
-3. **Планировщик (Planner)**: Рассчитывает точный план изменений (`needs_format`, `needs_mkdir`, `needs_mount`, `needs_pvesm_add`) и сохраняет его в `runtime/plans/storage_plan.json`.
-4. **Применение (Provisioning)**: Создает mount-юниты systemd, форматирует файловые системы, обновляет `/etc/fstab` и регистрирует диски в Proxmox VE.
-5. **Верификация**: Проводит аудит после развертывания, проверяет монтирование через `findmnt`, фиксирует дрейф конфигурации и генерирует `runtime/reports/stage4.json`.
-
----
-
-## 📡 Runtime API v1 и Доменная модель
-
-Взаимодействие между этапами в HoRus-Start регламентируется **Runtime API v1**, исключая скрытые зависимости и ненадёжные переменные Ansible.
-
-- **Config (`config/`)**: Единственный источник правды для желаемого состояния (Desired State).
-- **Runtime (`runtime/`)**: Единственный источник правды для фактического и планируемого состояния.
-  - `runtime/discovery/` — Собранный инвентарь оборудования.
-  - `runtime/facts/` — Нормализованные факты инфраструктуры.
-  - `runtime/plans/` — Машиночитаемые планы выполнения.
-  - `runtime/reports/` — Отчеты о дрейфе и результаты выполнения.
-  - `runtime/cache/`, `runtime/locks/`, `runtime/state/` — Внутреннее состояние этапов.
-
-Все публичные JSON-объекты runtime соответствуют схемам в `schemas/runtime/` и содержат обязательные заголовки (`api_version: "v1"`, `schema_version: "1.0"`).
-
----
-
-## 📁 Структура репозитория
-
-```
-HoRus-Start/
-├── .github/                 # CI/CD Воркли (сканирование секретов, валидация YAML, ansible-lint)
-├── config/                  # Декларативная конфигурация кластера и дисков (SOT)
-│   ├── examples/            # Примеры конфигураций cluster, network, storage
-│   ├── storage.yml
-│   └── image_catalog.yml
-├── credentials/             # SSH-ключи и пароли (ИГНОРИРУЮТСЯ В GIT)
-├── docs/                    # Архитектурная и эксплуатационная документация
-│   ├── architecture/        # Спецификации доменной модели, планировщика и Runtime API
-│   ├── getting-started/     # Установка, Быстрый старт, Требования
-│   ├── golden-images/       # Комплексное руководство по Golden-шаблонам ВМ и LXC
-│   ├── operations/          # Устранение неполадок, Восстановление, Бэкап
-│   └── security/            # Модель безопасности, Управление секретами, Threat Model
-├── inventory/               # Инвентарь Ansible (hosts.yml)
-├── playbooks/               # Плейбуки выполнения (00_*.yml — 04_*.yml)
-├── plugins/                 # Пользовательские плагины фильтров и действий Ansible
-├── roles/                   # Модульные роли (storage_prepare, proxmox_templates и др.)
-├── runtime/                 # Объекты Runtime API v1 (ИГНОРИРУЮТСЯ В GIT)
-├── schemas/                 # Схемы JSON для валидации
-├── scripts/                 # Скрипты проверки и валидации схем
-│   ├── stage0_preflight.py
-│   ├── storage_validate.py
-│   └── validate_schemas.py
-├── horus-start              # Интерактивный CLI-лаунчер
-├── SECURITY.md              # Политика безопасности и репортинг уязвимостей
-├── CONTRIBUTING.md          # Руководство по вкладу в проект
-├── CODE_OF_CONDUCT.md       # Кодекс поведения сообщества
-└── README.md                # Главная документация
-```
-
----
-
-## 🛠️ Инструкция по запуску
-
-### 1. Запуск интерактивного лаунчера
 ```bash
-./horus-start
-```
+cd /path/to/HoRus-Start
+export HORUS_SSH_KEY_DIR=/mnt/c/Users/Benden/.ssh/horus/horus-pmx-node
 
-### 2. Запуск отдельных этапов
-```bash
-# Stage 0: Infrastructure Readiness Gate (Preflight Control Plane)
 python3 scripts/stage0_preflight.py
-
-# Stage 1: Подготовка SSH связности
 ansible-playbook -i inventory/hosts.yml playbooks/00_bootstrap_connectivity.yml
-
-# Stage 2: Базовая подготовка системы (Debian 13)
 ansible-playbook -i inventory/hosts.yml playbooks/01_base_system_prep.yml
-
-# Stage 3: Настройка кластера Proxmox VE
 ansible-playbook -i inventory/hosts.yml playbooks/02_proxmox_cluster.yml
-
-# Stage 4: Подготовка хранилищ (Режим планирования / Dry-run)
-ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml -e "storage_plan_only=true"
-
-# Stage 4: Подготовка хранилищ (Применение изменений)
-ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml
-
-# Stage 5: Подготовка и валидация ассетов
-ansible-playbook -i inventory/hosts.yml playbooks/04_proxmox_templates.yml
 ```
 
-### 3. Проверка и валидация
-```bash
-# Валидация конфигурации и инвентаря дисков
-python3 scripts/storage_validate.py
+Stage 0 при первом запуске создаёт ключ Ed25519 вне репозитория. Playbook 00 запрашивает пароли root в терминале, устанавливает публичный ключ и проверяет SSH. Playbook 01 приводит репозитории к Debian Trixie и Proxmox no-subscription, обновляет пакеты. Playbook 02 последовательно добавляет ноды и проверяет Corosync/quorum. Уже включённые ноды повторно не добавляются; пароль root первой ноды запрашивается лишь при необходимости присоединения.
 
-# Валидация JSON-схем Runtime API v1
-python3 scripts/validate_schemas.py
-```
+`./horus-start` запускает preflight и SSH-этап. `playbooks/site.yml` запускает три Ansible playbook; на новой управляющей машине сначала отдельно выполните Stage 0.
 
----
+Закрытый ключ хранится в `~/.ssh/horus/horus-pmx-node` или в каталоге из `HORUS_SSH_KEY_DIR`. Имя ключа по умолчанию — `horus-pmx-cluster`; его можно изменить через `HORUS_SSH_KEY_NAME`. Пароли вводятся во время работы и не записываются в YAML репозитория.
 
-## 🔒 Безопасность и приватность
+## Границы проекта
 
-Все приватные данные, включая SSH-ключи (`credentials/ssh/*`), пароли, файлы Ansible Vault (`.vault_pass`), `.env` файлы и логи выполнения внесены в `.gitignore`. Автоматическое сканирование секретов (`ggshield`) запускается при каждом push.
+Диски, файловые системы, хранилища Proxmox, GPU/PCI passthrough, шаблоны VM и приложения настраиваются отдельно. Успешная сборка кластера не означает готовность дисков или видеокарт.
+
+Локальные отчёты лежат в `runtime/reports/` и игнорируются Git. Проверка: `python3 scripts/validate_schemas.py`. Подробности: [установка](docs/getting-started/INSTALLATION.md), [быстрый старт](docs/getting-started/QUICKSTART.md), [устранение ошибок](docs/operations/TROUBLESHOOTING.md).

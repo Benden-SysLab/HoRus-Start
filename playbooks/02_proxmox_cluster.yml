@@ -10,7 +10,8 @@
 # ==============================================================================
 
 - name: "Stage 2 | Proxmox VE Cluster Initialization & Node Joining"
-  hosts: proxmox_nodes:proxmox:all
+  hosts: proxmox_nodes
+  any_errors_fatal: true
   gather_facts: true
   become: true
   vars_files:

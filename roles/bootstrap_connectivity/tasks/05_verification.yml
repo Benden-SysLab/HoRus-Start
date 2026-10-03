@@ -36,7 +36,7 @@
     content: |
       {
         "stage": "0. Bootstrap Connectivity",
-        "timestamp": "{{ ansible_date_time.iso8601 | default('2026-07-28T06:00:00Z') }}",
+        "timestamp": "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}",
         "status": "COMPLETED",
         "nodes_verified": {{ groups['proxmox_nodes'] | length }},
         "nodes": [
@@ -59,10 +59,10 @@
       - "=========================================================================="
       - "HoRus-Start Stage 0: Bootstrap Connectivity COMPLETED SUCCESSFULLY!"
       - "--------------------------------------------------------------------------"
-      - "✔ 0.0 Wizard: Secrets in credentials/ and long-term topology in config/cluster.yml"
+      - "✔ 0.0 Wizard: Runtime passwords kept in memory; long-term topology in config/cluster.yml"
       - "✔ 0.1 Discovery: All {{ groups['proxmox_nodes'] | length }} Proxmox nodes IP/ICMP/SSH verified."
       - "✔ 0.2 Authentication: SSH Login capability verified."
-      - "✔ 0.3 SSH Identity: ed25519 Infrastructure key generated in credentials/ssh/."
+      - "✔ 0.3 SSH Identity: external horus-pmx-cluster ed25519 key verified."
       - "✔ 0.4 SSH Deployment: Public key deployed to /root/.ssh/authorized_keys."
       - "✔ 0.5 Verification: Passwordless key-only SSH login verified on all nodes."
       - "--------------------------------------------------------------------------"

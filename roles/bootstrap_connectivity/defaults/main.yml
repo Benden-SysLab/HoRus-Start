@@ -3,19 +3,14 @@
 config_dir: "{{ playbook_dir }}/../config"
 cluster_config_file: "{{ config_dir }}/cluster.yml"
 network_config_file: "{{ config_dir }}/network.yml"
-storage_config_file: "{{ config_dir }}/storage.yml"
-services_config_file: "{{ config_dir }}/services.yml"
 
-# Credentials Directory Paths (credentials/ - SECRETS ONLY)
-credentials_dir: "{{ playbook_dir }}/../credentials"
-credentials_file: "{{ credentials_dir }}/proxmox_credentials.yml"
-
-# SSH Identity & Manifest Metadata
-ssh_identity_dir: "{{ credentials_dir }}/ssh"
-ssh_identity_filename: "id_ed25519_horus_infra"
+# SSH keys live outside the repository. Set HORUS_SSH_KEY_DIR on the control
+# node to the platform-specific path, or use the default ~/.ssh location.
+ssh_identity_dir: "{{ lookup('env', 'HORUS_SSH_KEY_DIR') | default((lookup('env', 'USERPROFILE') if lookup('env', 'USERPROFILE') else lookup('env', 'HOME')) ~ '/.ssh/horus/horus-pmx-node', true) }}"
+ssh_identity_filename: "{{ lookup('env', 'HORUS_SSH_KEY_NAME') | default('horus-pmx-cluster', true) }}"
 ssh_identity_manifest: "{{ ssh_identity_dir }}/manifest.yml"
 ssh_identity_type: "ed25519"
-ssh_identity_comment: "terraform-srv@horus-infrastructure"
+ssh_identity_comment: "horus-pmx-cluster@horus"
 ansible_ssh_private_key_file: "{{ ssh_identity_dir }}/{{ ssh_identity_filename }}"
 
 inventory_file: "{{ playbook_dir }}/../inventory/hosts.yml"

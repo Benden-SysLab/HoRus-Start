@@ -24,18 +24,18 @@
   vars_files:
     - "../roles/bootstrap_connectivity/defaults/main.yml"
   tasks:
-    - name: "0.0.X | Load Node Credentials & Management Network Config"
+    - name: "0.0.X | Load Management Network Config"
       ansible.builtin.include_vars:
         file: "{{ item }}"
       loop:
-        - "{{ playbook_dir }}/../credentials/proxmox_credentials.yml"
         - "{{ playbook_dir }}/../config/network.yml"
 
     - name: "0.0.X | Bind SSH Login User, Password & IP to Runtime Connection Vars"
       ansible.builtin.set_fact:
-        ansible_user: "{{ (node_credentials | default({})).get(inventory_hostname, {}).get('username') | default((nodes | default({})).get(inventory_hostname, {}).get('username'), true) | default('root', true) }}"
-        ansible_password: "{{ (node_credentials | default({})).get(inventory_hostname, {}).get('password') | default((nodes | default({})).get(inventory_hostname, {}).get('password'), true) | default('', true) }}"
-        ansible_host: "{{ (node_network | default({})).get(inventory_hostname, {}).get('management_ip') | default((nodes | default({})).get(inventory_hostname, {}).get('management_ip'), true) | default(ansible_host, true) }}"
+        ansible_user: "{{ (hostvars['localhost'].node_credentials | default({})).get(inventory_hostname, {}).get('username') | default(ansible_user | default('root'), true) }}"
+        ansible_password: "{{ (hostvars['localhost'].node_credentials | default({})).get(inventory_hostname, {}).get('password') | default('', true) }}"
+        ansible_host: "{{ (nodes | default({})).get(inventory_hostname, {}).get('management_ip') | default(ansible_host, true) }}"
+      no_log: true
 
     - name: "Include Stage 0.1 Discovery Tasks"
       ansible.builtin.include_tasks: "../roles/bootstrap_connectivity/tasks/01_discovery.yml"

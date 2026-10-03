@@ -7,29 +7,78 @@
   changed_when: false
   when: inventory_hostname != (master_node | default('horus-pmx-node01'))
 
+- name: "2.3.1b [Join] Determine whether any worker node requires joining"
+  ansible.builtin.set_fact:
+    cluster_join_required: >-
+      {{
+        groups['proxmox_nodes']
+        | reject('equalto', master_node | default('horus-pmx-node01'))
+        | map('extract', hostvars)
+        | selectattr('is_in_cluster', 'equalto', false)
+        | list
+        | length > 0
+      }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+
+- name: "2.3.1c [Join] Prompt for master root password for API join"
+  ansible.builtin.pause:
+    prompt: "Enter root password for cluster master {{ hostvars[master_node | default('horus-pmx-node01')]['ansible_host'] }} (join only; output is hidden): "
+    echo: false
+  register: cluster_join_password_input
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  when: hostvars['localhost'].cluster_join_required | bool
+
+- name: "2.3.1d [Join] Keep cluster join password in memory for this run only"
+  ansible.builtin.set_fact:
+    cluster_join_password: "{{ cluster_join_password_input.user_input }}"
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  no_log: true
+  when: hostvars['localhost'].cluster_join_required | bool
+
 - name: "2.3.2 [Join] Join worker nodes to target Proxmox VE Cluster"
-  ansible.builtin.command: >
-    pvecm add {{ hostvars[master_node | default('horus-pmx-node01')]['ansible_host'] }} --ring0_addr {{ ansible_host }}
+  ansible.builtin.expect:
+    command: >-
+      pvecm add {{ hostvars[master_node | default('horus-pmx-node01')]['ansible_host'] }}
+      --link0 {{ ansible_host }}
+    responses:
+      "Please enter superuser.*": "{{ hostvars['localhost']['cluster_join_password'] }}"
+      'Are you sure you want to continue connecting.*': "yes"
+    echo: false
+    timeout: 120
   when:
     - inventory_hostname != (master_node | default('horus-pmx-node01'))
     - not (is_in_cluster | default(false))
     - pvecm_status_post_create.rc != 0
   register: pvecm_join_out
+  no_log: true
+  failed_when: >-
+    (pvecm_join_out.rc | default(1) | int) != 0 or
+    'authentication failure' in (pvecm_join_out.stdout | default('') | lower) or
+    'error:' in (pvecm_join_out.stdout | default('') | lower)
+  # Proxmox cluster membership changes must not run concurrently.
+  # A parallel pvecm add can leave later workers outside the cluster while
+  # the command itself appears successful to Ansible.
+  throttle: 1
 
 - name: "2.3.3 [Join] Wait dynamically for cluster quorum synchronization post-join"
   ansible.builtin.command: pvecm status
   register: pvecm_status_sync
   until: >-
-    'Quorate: Yes' in pvecm_status_sync.stdout or
-    'Quorum: OK' in pvecm_status_sync.stdout or
-    'Quorum: Yes' in pvecm_status_sync.stdout or
-    'Quate: Yes' in pvecm_status_sync.stdout
+    (pvecm_status_sync.stdout | regex_search('Quorate:\\s+Yes')) or
+    (pvecm_status_sync.stdout | regex_search('Quorum:\\s+(OK|Yes)'))
   retries: 30
   delay: 2
   changed_when: false
   when:
     - inventory_hostname != (master_node | default('horus-pmx-node01'))
     - pvecm_join_out is defined and pvecm_join_out is changed
+    - (pvecm_join_out.rc | default(1) | int) == 0
 
 - name: "2.3.4 [Join] Confirm worker node joined cluster successfully"
   ansible.builtin.debug:

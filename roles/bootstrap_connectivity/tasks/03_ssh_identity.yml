@@ -1,6 +1,6 @@
 ---
 # 0.3 SSH Identity Tasks (Run on localhost)
-- name: "0.3.1 [SSH Identity] Ensure local credentials/ssh directory exists"
+- name: "0.3.1 [SSH Identity] Ensure external HoRus SSH directory exists"
   ansible.builtin.file:
     path: "{{ ssh_identity_dir }}"
     state: directory
@@ -52,18 +52,26 @@
     horus_infra_public_key: "{{ public_key_slurp.content | b64decode | trim }}"
   run_once: true
 
-- name: "0.3.8 [SSH Identity] Write SSH key metadata manifest to credentials/ssh/manifest.yml"
+- name: "0.3.7b [SSH Identity] Calculate public key fingerprint"
+  ansible.builtin.command:
+    cmd: "ssh-keygen -lf {{ ssh_identity_dir }}/{{ ssh_identity_filename }}.pub -E sha256"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  register: public_key_fingerprint
+
+- name: "0.3.8 [SSH Identity] Write external SSH key metadata manifest"
   ansible.builtin.copy:
     dest: "{{ ssh_identity_manifest }}"
     mode: '0644'
     content: |
-      # Infrastructure SSH Identity Manifest Metadata (credentials/ssh/ - SECRETS ONLY)
+      # Infrastructure SSH Identity Manifest Metadata (outside the repository)
       key:
         type: "{{ ssh_identity_type }}"
         name: "{{ ssh_identity_filename }}"
         file: "{{ ssh_identity_filename }}"
-      created: "{{ ansible_date_time.date | default('2026-07-28') }}"
-      fingerprint: "SHA256:HoRusInfraEd25519KeyDay0Bootstrap2026"
+      created: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+      fingerprint: "{{ public_key_fingerprint.stdout.split()[1] }}"
       status:
         active: true
   delegate_to: localhost
@@ -72,7 +80,7 @@
 - name: "0.3.9 [SSH Identity] Enforce persistent key storage & non-deletion protection"
   ansible.builtin.debug:
     msg:
-      - "✔ SSH keys verified and retained permanently in {{ ssh_identity_dir }}/"
+      - "✔ SSH keys verified outside the repository in {{ ssh_identity_dir }}/"
       - "✔ Metadata manifest active at {{ ssh_identity_manifest }}"
       - "✔ Deletion protection active: Private key (0600) and Public key (0644) locked for cluster management."
 

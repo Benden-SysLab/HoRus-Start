@@ -1,23 +1,13 @@
 # Changelog
 
-## [2.0.0-RC1]
+## Unreleased
 
-### Added
+- Verified the four-node HoRus-SysLab cluster on Debian 13 / Proxmox VE 9.2.21.
+- Made cluster joins sequential and corrected TLS prompt and quorum verification.
+- Standardized Debian and Proxmox APT sources.
+- Kept SSH keys external and passwords interactive.
+- Removed unused storage, asset and Terraform automation; updated documentation to the active cluster bootstrap.
 
-- Stage 0 bootstrap pipeline
-- Proxmox discovery
-- Storage preparation
-- Golden Image Factory preparation
-- Runtime API v1
+## 2.0.0-rc1
 
-### Security
-
-- GitGuardian secret scanning
-- Credential isolation
-- Security model documentation
-
-### Documentation
-
-- Installation guide
-- Recovery procedures
-- Threat model
+Initial multi-stage prototype. See Git history for the original storage and asset automation.

@@ -1,4 +1,4 @@
-name: Ansible Quality Audit
+name: Ansible Syntax Check
 
 on:
   push:
@@ -7,8 +7,8 @@ on:
     branches: [ main, master, "v2*" ]
 
 jobs:
-  ansible_lint:
-    name: Ansible Playbooks & Roles Lint
+  ansible_syntax:
+    name: Validate Active Playbooks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -19,10 +19,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Ansible Lint
+      - name: Install Ansible
         run: |
-          pip install ansible-lint ansible-core
+          pip install ansible-core
 
-      - name: Run Ansible Lint
+      - name: Check active pipeline syntax
         run: |
-          ansible-lint playbooks/*.yml --exclude .cache || true
+          ansible-playbook -i inventory/hosts.yml playbooks/site.yml --syntax-check

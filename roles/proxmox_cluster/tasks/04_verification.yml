@@ -26,16 +26,18 @@
 - name: "2.4.5 [Verification] Assert Quorum is established on all cluster nodes"
   ansible.builtin.assert:
     that:
-      - "'Quate: Yes' in pvecm_status_verify.stdout or 'Quorum: OK' in pvecm_status_verify.stdout or 'Quorum: Yes' in pvecm_status_verify.stdout or 'Quorate: Yes' in pvecm_status_verify.stdout or 'Quorate: 1' in pvecm_status_verify.stdout or 'Quorum' in pvecm_status_verify.stdout"
+      - "pvecm_status_verify.stdout | regex_search('(?m)^Quorate:\\s+Yes\\s*$')"
     fail_msg: "CRITICAL: Proxmox Cluster Quorum is NOT active on {{ inventory_hostname }}!"
     success_msg: "✔ Cluster Quorum is confirmed OK on {{ inventory_hostname }}."
 
 - name: "2.4.6 [Verification] Verify inventory nodes presence in cluster node list"
   ansible.builtin.assert:
     that:
-      - "inventory_hostname in pvecm_nodes_verify.stdout"
-    fail_msg: "CRITICAL: Inventory node {{ inventory_hostname }} missing from 'pvecm nodes' output!"
-    success_msg: "✔ Node {{ inventory_hostname }} verified in cluster membership list."
+      - "item in pvecm_nodes_verify.stdout"
+      - "cluster_name in pvecm_status_verify.stdout"
+    fail_msg: "CRITICAL: {{ item }} or cluster {{ cluster_name }} missing from the view on {{ inventory_hostname }}."
+    success_msg: "✔ {{ item }} confirmed on {{ inventory_hostname }}."
+  loop: "{{ groups['proxmox_nodes'] }}"
 
 - name: "2.4.7 [Verification] Ensure runtime/reports directory exists on localhost"
   ansible.builtin.file:
@@ -54,8 +56,8 @@
       {
         "stage": 2,
         "name": "Proxmox VE Cluster Setup",
-        "status": "success",
-        "executed_at": "{{ ansible_date_time.iso8601 if ansible_date_time is defined else '' }}",
+        "status": "COMPLETED",
+        "executed_at": "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}",
         "cluster": {
           "name": "{{ cluster_name | default('HoRus-SysLab') }}",
           "master": "{{ master_node | default('horus-pmx-node01') }}",

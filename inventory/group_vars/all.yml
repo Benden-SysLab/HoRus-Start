@@ -3,14 +3,14 @@
 cluster_name: "HoRus-SysLab"
 ansible_user: "root"
 
-# SSH Identity Configuration
-ssh_key_dir: "{{ playbook_dir }}/../credentials/ssh"
-ssh_key_filename: "id_ed25519_horus_infra"
+# SSH Identity Configuration. The key is external to the repository.
+ssh_key_dir: "{{ lookup('env', 'HORUS_SSH_KEY_DIR') | default((lookup('env', 'USERPROFILE') if lookup('env', 'USERPROFILE') else lookup('env', 'HOME')) ~ '/.ssh/horus/horus-pmx-node', true) }}"
+ssh_key_filename: "{{ lookup('env', 'HORUS_SSH_KEY_NAME') | default('horus-pmx-cluster', true) }}"
 ssh_private_key_path: "{{ ssh_key_dir }}/{{ ssh_key_filename }}"
 ssh_public_key_path: "{{ ssh_key_dir }}/{{ ssh_key_filename }}.pub"
 ansible_ssh_private_key_file: "{{ ssh_private_key_path }}"
 ssh_key_type: "ed25519"
-ssh_key_comment: "terraform-srv@horus-infrastructure"
+ssh_key_comment: "horus-pmx-cluster@horus"
 
 # Connectivity & Discovery parameters
 ssh_port: 22
@@ -18,5 +18,3 @@ ping_count: 2
 discovery_timeout_seconds: 5
 
 # Reports output
-reports_dir: "{{ playbook_dir }}/../reports"
-stage0_report_file: "{{ reports_dir }}/stage0_connectivity.json"

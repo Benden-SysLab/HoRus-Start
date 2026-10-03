@@ -1,28 +1,12 @@
-# Example Proxmox Infrastructure Cluster Configuration (config/cluster.yml)
 cluster:
-  name: "example-cluster"
+  name: example-cluster
 
 nodes:
-  - name: node01
-
-    roles:
-      - control-plane
-
-    capabilities:
-      - compute
-
-  - name: node02
-
-    roles:
-      - worker
-
-    capabilities:
-      - compute
-
-  - name: node03
-
-    roles:
-      - worker
-
-    capabilities:
-      - storage
+  - name: horus-pmx-node01
+    role: [master]
+  - name: horus-pmx-node02
+    role: [worker]
+  - name: horus-pmx-node03
+    role: [worker]
+  - name: horus-pmx-node04
+    role: [worker]

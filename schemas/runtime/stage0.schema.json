@@ -34,12 +34,9 @@
     },
     "checks": {
       "type": "object",
-      "required": ["credentials", "connectivity", "storage_discovery", "artifacts"],
+      "required": ["ssh_identity"],
       "properties": {
-        "credentials": { "type": "string" },
-        "connectivity": { "type": "string" },
-        "storage_discovery": { "type": "string" },
-        "artifacts": { "type": "string" }
+        "ssh_identity": { "type": "string", "enum": ["PASS", "FAIL"] }
       }
     },
     "generated_templates": {

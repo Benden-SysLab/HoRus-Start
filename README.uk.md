@@ -1,145 +1,23 @@
-# HoRus-Start — Платформа IaC для автоматизації Proxmox VE (v2.0-RC1)
+# HoRus-Start
 
-🌐 **Мови**: [English](./README.md) | [Русский](./README.ru.md) | **Українська** | [日本語](./README.ja.md) | [Deutsch](./README.de.md) | [Français](./README.fr.md)
+[English](README.md) · [Русский](README.ru.md) · [Українська](README.uk.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [日本語](README.ja.md)
 
----
+Ansible-проєкт для початкового налаштування чотирьох вузлів Proxmox VE та створення кластера **HoRus-SysLab**. Робочі етапи налаштовують SSH, репозиторії Debian/Proxmox, базові пакети й перевіряють кластер. Перевірено на Debian 13 та Proxmox VE 9.2.21.
 
-## 🏛️ Архітектурний огляд та концепція
+Вузли: `horus-pmx-node01` — `10.255.0.7`, `node02` — `10.255.0.8`, `node03` — `10.255.0.9`, `node04` — `10.255.0.10`.
 
-**HoRus-Start v2** — це промисловий фреймворк автоматизації IaC (Infrastructure-as-Code), призначений для розгортання, підготовки та управління кластерами гіпервізорів Proxmox VE на bare-metal серверах. Побудований на декларативних принципах, модульних ролях Ansible та версіонованому Runtime API v1 на базі JSON, HoRus-Start забезпечує повний цикл управління — від початкового налаштування SSH-зв'язності до розподілених сховищ та каталогу хмарних образів.
+## Запуск із WSL Debian
 
-> 🔒 **Замороження архітектури (Architecture Freeze v2.0-RC1)**: Пайплайн HoRus-Start заморожений і строго обмежений **Етапами 0–5**. Пайплайн завершує роботу після виконання Етапу 5 (Asset Preparation & Validation). Ручне створення Golden-шаблонів, провіжинінг через Terraform та розгортання додатків виконуються за межами HoRus-Start. Покрокова інструкція з ручного створення золотих образів (VM ID 9000 Base, VM ID 9001 Docker, LXC-шаблонів та SRE-стандартів) задокументована в [docs/golden-images/](./docs/golden-images/).
+Потрібні Python 3 та Ansible. Перевірте `inventory/hosts.yml`, `config/network.yml` та `config/cluster.yml` перед запуском.
 
----
-
-## 🚀 Пайплайн виконання та етапи системи
-
-HoRus-Start дотримується чіткого 5-крокового пайплайну на всіх етапах:
-
-```
-[ Декларативний конфіг ] ──► 1. Discovery ──► 2. Normalization ──► 3. Planning ──► 4. Provisioning ──► 5. Verification & Reports
-```
-
-### Огляд етапів
-
-| Етап | Назва | Опис | Статус |
-| :--- | :--- | :--- | :--- |
-| **Stage 0** | **Infrastructure Readiness Gate** | Перевірка готовності середовища (Preflight), автостворення шаблонів облікових даних, пошук дисків та валідація хешів дистрибутивів (`stage0.json`). | **СТАБІЛЬНИЙ** |
-| **Stage 1** | **Bootstrap Connectivity** | Перевірка доступності вузлів, генерація локальних ed25519 SSH-ключів, розгортання публічних ключів та валідація безпарольного SSH доступу. | **СТАБІЛЬНИЙ** |
-| **Stage 2** | **Base System Prep** | Налаштування репозиторіїв APT (Debian 13 Trixie & pve-no-subscription), оновлення ядра, встановлення системних утиліт та тюнінг sysctl. | **СТАБІЛЬНИЙ** |
-| **Stage 3** | **Proxmox Cluster** | Ініціалізація кластера `pvecm` quorum на вузлах, налаштування мережі corosync. | **СТАБІЛЬНИЙ** |
-| **Stage 4** | **Storage Prepare** | Безпечний пошук фізичних дисків (`/dev/disk/by-id/`), перевірка безпеки системного диска, планування, форматування ext4/ZFS та реєстрація PVE сховищ. | **СТАБІЛЬНИЙ** |
-| **Stage 5** | **Asset Preparation & Validation** | Завантаження хмарних ISO/образів (Ubuntu, Debian, Alpine), драйверів VirtIO, кешу LXC; публікація дистрибутивів у сховище PVE; перевірка хешів та цілісності `qemu-img`. | **СТАБІЛЬНИЙ** |
-
-> 🛑 **Зупинка пайплайну**: Автоматизація повністю завершується після виконання Stage 5.
-
----
-
-## 💾 Архітектура підсистеми сховищ (Stage 4)
-
-Stage 4 надає механізми безпечного зведення сховищ до бажаного стану:
-
-1. **Discovery**: Сканує блочні пристрої через `lsblk -J` та зіставляє їх зі стабільними симлінками `/dev/disk/by-id/` без зміни стану дисків.
-2. **Захист системного диска**: Перевіряє, щоб цільові диски не перетиналися з системним диском ОС (`/`, `/boot`, `/boot/efi`, `/etc/pve`).
-3. **Планувальник (Planner)**: Розраховує точний план змін (`needs_format`, `needs_mkdir`, `needs_mount`, `needs_pvesm_add`) і зберігає його в `runtime/plans/storage_plan.json`.
-4. **Застосування (Provisioning)**: Створює mount-юніти systemd, форматує файлові системи, оновлює `/etc/fstab` та реєструє диски в Proxmox VE.
-5. **Верифікація**: Проводить аудит після розгортання, перевіряє монтування через `findmnt`, фіксує дрейф конфігурації та генерує `runtime/reports/stage4.json`.
-
----
-
-## 📡 Runtime API v1 та Доменна модель
-
-Взаємодія між етапами в HoRus-Start регламентується **Runtime API v1**, виключаючи приховані залежності та ненадійні змінні Ansible.
-
-- **Config (`config/`)**: Єдине джерело правди для бажаного стану (Desired State).
-- **Runtime (`runtime/`)**: Єдине джерело правди для фактичного та запланованого стану.
-  - `runtime/discovery/` — Зібраний інвентар обладнання.
-  - `runtime/facts/` — Нормалізовані факти інфраструктури.
-  - `runtime/plans/` — Машиночитані плани виконання.
-  - `runtime/reports/` — Звіти про дрейф та результати виконання.
-  - `runtime/cache/`, `runtime/locks/`, `runtime/state/` — Внутрішній стан етапів.
-
-Усі публічні JSON-об'єкти runtime відповідають схемам у `schemas/runtime/` та містять обов'язкові заголовки (`api_version: "v1"`, `schema_version: "1.0"`).
-
----
-
-## 📁 Структура репозиторію
-
-```
-HoRus-Start/
-├── .github/                 # CI/CD Воркли (сканування секретів, валідація YAML, ansible-lint)
-├── config/                  # Декларативна конфігурація кластера та дисків (SOT)
-│   ├── examples/            # Приклади конфігурацій cluster, network, storage
-│   ├── storage.yml
-│   └── image_catalog.yml
-├── credentials/             # SSH-ключі та паролі (ІГНОРУЮТЬСЯ В GIT)
-├── docs/                    # Архітектурна та експлуатаційна документація
-│   ├── architecture/        # Специфікації доменної моделі, планувальника та Runtime API
-│   ├── getting-started/     # Встановлення, Швидкий старт, Вимоги
-│   ├── golden-images/       # Документація з Golden-шаблонів ВМ та LXC
-│   ├── operations/          # Усунення неполадок, Відновлення, Бекап
-│   └── security/            # Модель безпеки, Управління секретами, Threat Model
-├── inventory/               # Інвентар Ansible (hosts.yml)
-├── playbooks/               # Плейбуки виконання (00_*.yml — 04_*.yml)
-├── plugins/                 # Плагіни фільтрів та дій Ansible
-├── roles/                   # Модульні ролі (storage_prepare, proxmox_templates та ін.)
-├── runtime/                 # Об'єкти Runtime API v1 (ІГНОРУЮТЬСЯ В GIT)
-├── schemas/                 # Схеми JSON для валідації
-├── scripts/                 # Скрипти перевірки та валідації схем
-│   ├── stage0_preflight.py
-│   ├── storage_validate.py
-│   └── validate_schemas.py
-├── horus-start              # Інтерактивний CLI-лаунчер
-├── SECURITY.md              # Політика безпеки та репортинг уразливостей
-├── CONTRIBUTING.md          # Керівництво щодо внеску в проект
-├── CODE_OF_CONDUCT.md       # Кодекс поведінки спільноти
-└── README.md                # Головна документація
-```
-
----
-
-## 🛠️ Інструкція із запуску
-
-### 1. Запуск інтерактивного лаунчера
 ```bash
-./horus-start
-```
-
-### 2. Запуск окремих етапів
-```bash
-# Stage 0: Infrastructure Readiness Gate (Preflight Control Plane)
+export HORUS_SSH_KEY_DIR=/mnt/c/Users/Benden/.ssh/horus/horus-pmx-node
 python3 scripts/stage0_preflight.py
-
-# Stage 1: Підготовка SSH зв'язності
 ansible-playbook -i inventory/hosts.yml playbooks/00_bootstrap_connectivity.yml
-
-# Stage 2: Базова підготовка системи (Debian 13)
 ansible-playbook -i inventory/hosts.yml playbooks/01_base_system_prep.yml
-
-# Stage 3: Налаштування кластера Proxmox VE
 ansible-playbook -i inventory/hosts.yml playbooks/02_proxmox_cluster.yml
-
-# Stage 4: Підготовка сховищ (Режим планування / Dry-run)
-ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml -e "storage_plan_only=true"
-
-# Stage 4: Підготовка сховищ (Застосування змін)
-ansible-playbook -i inventory/hosts.yml playbooks/03_storage_prepare.yml
-
-# Stage 5: Підготовка та валідація асетів
-ansible-playbook -i inventory/hosts.yml playbooks/04_proxmox_templates.yml
 ```
 
-### 3. Перевірка та валідація
-```bash
-# Валідація конфігурації та інвентаря дисків
-python3 scripts/storage_validate.py
+Stage 0 створює зовнішній ключ Ed25519 за потреби. Playbook 00 запитує паролі root у терміналі та налаштовує SSH. Playbook 01 налаштовує Debian Trixie і Proxmox no-subscription та оновлює пакети. Playbook 02 послідовно додає вузли і перевіряє quorum. Повторний запуск пропускає вже додані вузли. Звіти містяться в `runtime/reports/` і не потрапляють до Git.
 
-# Валідація JSON-схем Runtime API v1
-python3 scripts/validate_schemas.py
-```
-
----
-
-## 🔒 Безпека та приватність
-
-Усі приватні дані, включаючи SSH-ключі (`credentials/ssh/*`), паролі, файли Ansible Vault (`.vault_pass`), `.env` файли та логи виконання внесені до `.gitignore`. Автоматичне сканування секретів (`ggshield`) запускається при кожному push.
+Диски, GPU, сховища, шаблони VM та застосунки налаштовуються окремо. `./horus-start` виконує preflight і SSH-етап; `playbooks/site.yml` виконує три Ansible playbook. Докладніше: [quickstart](docs/getting-started/QUICKSTART.md).

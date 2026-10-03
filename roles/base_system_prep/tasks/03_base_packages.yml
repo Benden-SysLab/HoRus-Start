@@ -25,6 +25,7 @@
       - xfsprogs
       - parted
       - pve-headers
+      - python3-pexpect
     state: present
     update_cache: true
     cache_valid_time: 3600
@@ -47,6 +48,7 @@
       - jq
       - ca-certificates
       - sudo
+      - python3-pexpect
     state: present
 
 - name: "1.3.3 [Base Packages] Confirm core administration packages status"

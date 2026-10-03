@@ -10,7 +10,7 @@
 # ==============================================================================
 
 - name: "Stage 1 | Base System Preparation for Proxmox VE Nodes"
-  hosts: proxmox_nodes:proxmox:all
+  hosts: proxmox_nodes
   gather_facts: true
   become: true
   vars_files:
